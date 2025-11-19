@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Fano STT - Advanced Speech-to-Text",
+    default: "Fano STT - Advanced Speech-to-Text (Demo Version)",
     template: "%s | Fano STT",
   },
   description:

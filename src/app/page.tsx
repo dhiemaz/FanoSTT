@@ -1521,10 +1521,10 @@ export default function HomePage() {
             transition={{ duration: 0.8 }}
           >
             <h1 className="text-4xl md:text-6xl font-bold gradient-text mb-6">
-              Speech-to-Text with Fano
+              Fano STT - Advanced Speech-to-Text
             </h1>
             <p className="text-xl text-white/70 max-w-2xl mx-auto leading-relaxed">
-              Audio Speech Transcription powered by Tetherfi with Fano
+              Audio Speech Transcription with Fanopowered by Tetherfi
             </p>
           </motion.div>
         </div>

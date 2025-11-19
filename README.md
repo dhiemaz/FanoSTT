@@ -9,7 +9,7 @@
 </div>
 
 <p align="center">
-  <strong>Professional speech-to-text transcription powered by Fano AI with real-time streaming and enterprise-grade accuracy</strong>
+  <strong>Speech-to-text transcription powered by Fano with real-time streaming and audio upload functionality</strong>
 </p>
 
 <p align="center">
