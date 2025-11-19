@@ -40,6 +40,8 @@ export function useWebSocket({
   const wsRef = useRef<WebSocket | null>(null);
   const isManuallyClosedRef = useRef(false);
   const messageQueueRef = useRef<FanoSTTRequest[]>([]);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptsRef = useRef(0);
 
   const updateConnectionStatus = useCallback(
     (updates: Partial<ConnectionStatus>) => {
@@ -49,7 +51,10 @@ export function useWebSocket({
   );
 
   const clearTimeouts = useCallback(() => {
-    // No timeouts to clear since reconnection is disabled
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
   }, []);
 
   const processMessageQueue = useCallback(() => {
@@ -74,6 +79,9 @@ export function useWebSocket({
 
   const handleOpen = useCallback(() => {
     console.log("✅ [FANO] Connected via proxy with Authorization header");
+
+    // Reset reconnection attempts on successful connection
+    reconnectAttemptsRef.current = 0;
 
     updateConnectionStatus({
       state: "connected",
@@ -113,39 +121,16 @@ export function useWebSocket({
     [updateConnectionStatus, onError],
   );
 
-  const handleClose = useCallback(
-    (event: CloseEvent) => {
-      console.log("🔌 [FANO] Connection closed:", event.code, event.reason);
-      clearTimeouts();
+  // Use useRef to store the reconnect function to avoid circular dependencies
+  const scheduleReconnectRef = useRef<() => void>();
 
-      const updates: Partial<ConnectionStatus> = {
-        state: "disconnected",
-      };
-      if (event.code !== 1000) {
-        updates.error = `Connection closed: ${event.reason || `Code ${event.code}`}`;
-      }
-      updateConnectionStatus(updates);
-
-      onDisconnect?.();
-
-      console.log(
-        "🔌 [FANO] Auto-reconnect disabled - connection will stay closed",
-      );
-    },
-    [updateConnectionStatus, onDisconnect],
-  );
-
-  const connect = useCallback(() => {
+  const createWebSocketConnection = useCallback(() => {
     if (
       wsRef.current?.readyState === WebSocket.OPEN ||
       wsRef.current?.readyState === WebSocket.CONNECTING
     ) {
-      console.log("🔌 [FANO] Already connected or connecting");
       return;
     }
-
-    isManuallyClosedRef.current = false;
-    clearTimeouts();
 
     updateConnectionStatus({
       state: "connecting",
@@ -155,12 +140,34 @@ export function useWebSocket({
       console.log("🔌 [FANO] Connecting via proxy server");
       console.log("🔌 [FANO] URL:", url);
 
-      // Connect without subprotocol, will send auth immediately after connection
       wsRef.current = new WebSocket(url);
+
       wsRef.current.onopen = handleOpen;
       wsRef.current.onmessage = handleMessage;
       wsRef.current.onerror = handleError;
-      wsRef.current.onclose = handleClose;
+
+      wsRef.current.onclose = (event: CloseEvent) => {
+        console.log("🔌 [FANO] Connection closed:", event.code, event.reason);
+        clearTimeouts();
+
+        const updates: Partial<ConnectionStatus> = {
+          state: "disconnected",
+        };
+        if (event.code !== 1000) {
+          updates.error = `Connection closed: ${event.reason || `Code ${event.code}`}`;
+        }
+        updateConnectionStatus(updates);
+
+        onDisconnect?.();
+
+        // Attempt to reconnect unless manually closed
+        if (!isManuallyClosedRef.current && scheduleReconnectRef.current) {
+          console.log("🔄 [FANO] Connection lost - initiating reconnection");
+          scheduleReconnectRef.current();
+        } else {
+          console.log("🔌 [FANO] Manual disconnect - no reconnection");
+        }
+      };
     } catch (error) {
       console.error("❌ [FANO] Failed to create connection:", error);
       updateConnectionStatus({
@@ -173,18 +180,78 @@ export function useWebSocket({
     }
   }, [
     url,
-    auth.token,
     updateConnectionStatus,
     handleOpen,
     handleMessage,
     handleError,
-    handleClose,
+    clearTimeouts,
+    onDisconnect,
     onError,
   ]);
+
+  // Create the reconnect function and store it in ref
+  scheduleReconnectRef.current = useCallback(() => {
+    if (isManuallyClosedRef.current) {
+      console.log("🔌 [FANO] Skipping reconnect - manually disconnected");
+      return;
+    }
+
+    const maxAttempts = 5;
+    const currentAttempts = reconnectAttemptsRef.current;
+
+    if (currentAttempts >= maxAttempts) {
+      console.log(
+        `❌ [FANO] Max reconnection attempts (${maxAttempts}) reached`,
+      );
+      updateConnectionStatus({
+        state: "error",
+        error: `Failed to reconnect after ${maxAttempts} attempts`,
+      });
+      return;
+    }
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s (max 30s)
+    const delay = Math.min(1000 * Math.pow(2, currentAttempts), 30000);
+    reconnectAttemptsRef.current = currentAttempts + 1;
+
+    console.log(
+      `🔄 [FANO] Reconnecting in ${delay}ms (attempt ${currentAttempts + 1}/${maxAttempts})`,
+    );
+
+    updateConnectionStatus({
+      state: "reconnecting",
+      reconnectAttempts: reconnectAttemptsRef.current,
+    });
+
+    reconnectTimeoutRef.current = setTimeout(() => {
+      console.log(
+        `🔄 [FANO] Attempting reconnection (${reconnectAttemptsRef.current}/${maxAttempts})`,
+      );
+      createWebSocketConnection();
+    }, delay);
+  }, [updateConnectionStatus, createWebSocketConnection]);
+
+  const connect = useCallback(() => {
+    if (
+      wsRef.current?.readyState === WebSocket.OPEN ||
+      wsRef.current?.readyState === WebSocket.CONNECTING
+    ) {
+      console.log("🔌 [FANO] Already connected or connecting");
+      return;
+    }
+
+    isManuallyClosedRef.current = false;
+    reconnectAttemptsRef.current = 0;
+    clearTimeouts();
+
+    createWebSocketConnection();
+  }, [clearTimeouts, createWebSocketConnection]);
 
   const disconnect = useCallback(() => {
     console.log("🔌 [FANO] Manually disconnecting");
     isManuallyClosedRef.current = true;
+    reconnectAttemptsRef.current = 0;
+    clearTimeouts();
 
     if (wsRef.current) {
       wsRef.current.close(1000, "Manual disconnect");
@@ -194,8 +261,9 @@ export function useWebSocket({
     messageQueueRef.current = [];
     updateConnectionStatus({
       state: "disconnected",
+      reconnectAttempts: 0,
     });
-  }, [updateConnectionStatus]);
+  }, [updateConnectionStatus, clearTimeouts]);
 
   const sendMessage = useCallback(
     (message: FanoSTTRequest) => {
@@ -218,20 +286,19 @@ export function useWebSocket({
         messageQueueRef.current.push(message);
       }
     },
-    [connectionStatus.state, onError],
+    [onError],
   );
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       isManuallyClosedRef.current = true;
+      clearTimeouts();
       if (wsRef.current) {
         wsRef.current.close(1000, "Component unmount");
       }
     };
-  }, []);
-
-  // Auto-reconnect disabled
+  }, [clearTimeouts]);
 
   return {
     connectionStatus,

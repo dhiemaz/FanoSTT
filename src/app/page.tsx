@@ -60,7 +60,9 @@ export default function HomePage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [finalTranscript, setFinalTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
-  const [useQueryAuth, setUseQueryAuth] = useState(true);
+  const [useQueryAuth, setUseQueryAuth] = useState(false);
+  const [lastRequest, setLastRequest] = useState<FanoSTTRequest | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -147,8 +149,30 @@ export default function HomePage() {
       });
     }
 
+    // Handle error responses
     if (message.data?.error) {
       console.error("❌ [FANO] STT Error:", message.data.error);
+
+      // Check for DEADLINE_EXCEEDED error
+      if (
+        message.data.error.code === 4 &&
+        message.data.error.message?.includes("DEADLINE_EXCEEDED")
+      ) {
+        console.log(
+          "⏱️ [FANO] DEADLINE_EXCEEDED detected - will retry after reconnection",
+        );
+
+        if (!isRetrying) {
+          setIsRetrying(true);
+          showToast(
+            "warning",
+            "Request Timeout",
+            "Reconnecting and retrying request...",
+          );
+        }
+        return;
+      }
+
       showToast("error", "Transcription Error", message.data.error.message);
       setIsProcessing(false);
     }
@@ -171,6 +195,48 @@ export default function HomePage() {
         showToast("warning", "Disconnected", "FANO STT connection lost");
       },
     });
+
+  // Handle DEADLINE_EXCEEDED error with reconnection and retry
+  const handleDeadlineExceeded = useCallback(() => {
+    console.log("🔄 [FANO] Starting DEADLINE_EXCEEDED recovery process");
+
+    // Step 1: Disconnect current connection
+    disconnect();
+
+    // Step 2: Wait and reconnect
+    setTimeout(() => {
+      console.log("🔄 [FANO] Reconnecting after DEADLINE_EXCEEDED...");
+      connect();
+    }, 1000);
+  }, [disconnect, connect]);
+
+  // Effect to handle DEADLINE_EXCEEDED retry logic
+  useEffect(() => {
+    if (
+      lastMessage?.data?.error?.code === 4 &&
+      lastMessage?.data?.error?.message?.includes("DEADLINE_EXCEEDED")
+    ) {
+      if (!isRetrying) {
+        setIsRetrying(true);
+        handleDeadlineExceeded();
+      }
+    }
+  }, [lastMessage, isRetrying, handleDeadlineExceeded]);
+
+  // Effect to handle request retry after reconnection
+  useEffect(() => {
+    if (connectionStatus.state === "connected" && isRetrying && lastRequest) {
+      console.log(
+        "📤 [FANO] Resending request after reconnection:",
+        lastRequest,
+      );
+
+      setTimeout(() => {
+        sendMessage(lastRequest);
+        setIsRetrying(false);
+      }, 1000);
+    }
+  }, [connectionStatus.state, isRetrying, lastRequest, sendMessage]);
 
   // Connection test function
   const testConnection = useCallback(() => {
@@ -200,10 +266,11 @@ export default function HomePage() {
           },
         };
 
+        setLastRequest(message);
         sendMessage(message);
       }
     },
-    [connectionStatus.state, sendMessage],
+    [connectionStatus.state, sendMessage, setLastRequest],
   );
 
   // Audio recorder hook
@@ -319,6 +386,7 @@ export default function HomePage() {
       console.log(
         "📤 [FANO AUTH] Using authenticated connection for file processing",
       );
+      setLastRequest(configMessage);
       sendMessage(configMessage);
 
       // Convert raw file to base64 (don't decode/re-encode for file uploads)
@@ -351,6 +419,7 @@ export default function HomePage() {
       console.log(
         "🔄 [FANO AUTH] Starting transcript aggregation - waiting for response segments...",
       );
+      setLastRequest(audioMessage);
       sendMessage(audioMessage);
       setUploadProgress(100);
 
@@ -360,10 +429,21 @@ export default function HomePage() {
         "Audio sent, waiting for transcription results...",
       );
 
-      // EOF disabled for file uploads - FANO will send EOF response when processing is complete
+      // Send EOF to signal end of audio file
+      const eofMessage: FanoSTTRequest = {
+        event: "request",
+        data: "EOF",
+      };
+
       console.log(
-        "📤 [FANO AUTH] File upload complete - waiting for FANO to send EOF response...",
+        "📤 [FANO AUTH] Sending EOF message via authenticated connection:",
+        eofMessage,
       );
+      console.log(
+        "📤 [FANO AUTH] File upload complete - now aggregating transcript responses...",
+      );
+      setLastRequest(eofMessage);
+      sendMessage(eofMessage);
       // Don't show completion toast here - wait for EOF response
     } catch (error) {
       console.error("File processing error:", error);
@@ -429,6 +509,7 @@ export default function HomePage() {
     console.log(
       "📤 [FANO AUTH] Starting real-time transcription with authenticated connection",
     );
+    setLastRequest(configMessage);
     sendMessage(configMessage);
     setTranscripts([]);
     setFinalTranscript("");
@@ -451,6 +532,8 @@ export default function HomePage() {
       data: "EOF",
     };
 
+    console.log("📤 [FANO AUTH] Sending EOF for recording:", eofMessage);
+    setLastRequest(eofMessage);
     sendMessage(eofMessage);
     showToast("success", "Recording Stopped", "Transcription completed");
   }, [stopRecording, sendMessage, showToast]);
