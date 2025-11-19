@@ -321,20 +321,21 @@ export default function HomePage() {
       );
       sendMessage(configMessage);
 
-      // Process entire file as single audio content
+      // Convert raw file to base64 (don't decode/re-encode for file uploads)
       const arrayBuffer = await selectedFile.arrayBuffer();
-      const audioContext = new (window.AudioContext ||
-        (window as any).webkitAudioContext)();
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      const uint8Array = new Uint8Array(arrayBuffer);
 
-      // Convert to mono if needed
-      const channelData = audioBuffer.getChannelData(0);
-
-      // Convert to Int16Array
-      const int16Data = float32ToInt16(channelData);
-
-      // Convert entire audio to base64
-      const base64Data = audioBufferToBase64(int16Data);
+      // Convert to base64 efficiently for large files
+      let binary = "";
+      const chunkSize = 0x8000; // 32KB chunks to avoid call stack overflow
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.subarray(
+          i,
+          Math.min(i + chunkSize, uint8Array.length),
+        );
+        binary += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+      const base64Data = btoa(binary);
 
       // Send entire audio file as single message
       const audioMessage: FanoSTTRequest = {
@@ -359,21 +360,10 @@ export default function HomePage() {
         "Audio sent, waiting for transcription results...",
       );
 
-      // Send EOF
-      const eofMessage: FanoSTTRequest = {
-        event: "request",
-        data: "EOF",
-      };
-
+      // EOF disabled for file uploads - FANO will send EOF response when processing is complete
       console.log(
-        "📤 [FANO AUTH] Sending EOF message via authenticated connection:",
-        eofMessage,
+        "📤 [FANO AUTH] File upload complete - waiting for FANO to send EOF response...",
       );
-      console.log(
-        "📤 [FANO AUTH] File upload complete - now aggregating transcript responses...",
-      );
-      sendMessage(eofMessage);
-      audioContext.close();
       // Don't show completion toast here - wait for EOF response
     } catch (error) {
       console.error("File processing error:", error);
