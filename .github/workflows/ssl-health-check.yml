@@ -1,0 +1,441 @@
+name: SSL Health Check
+
+on:
+  # Run every 6 hours
+  schedule:
+    - cron: '0 */6 * * *'
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      detailed_check:
+        description: 'Run detailed health checks (including performance tests)'
+        required: false
+        default: false
+        type: boolean
+      notify_on_success:
+        description: 'Send notification even when everything is healthy'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  DOMAIN: "143.198.192.233.nip.io"
+  EXPECTED_SERVICES: 3  # nginx, fano-stt-app, fano-proxy
+
+jobs:
+  ssl-health-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+
+      - name: Add Digital Ocean host to known hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.DO_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Check SSL certificate health
+        id: cert-health
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DOMAIN: ${{ env.DOMAIN }}
+        run: |
+          ssh $DO_USER@$DO_HOST << 'EOF'
+            cd /opt/fano-stt
+
+            echo "🔍 SSL Certificate Health Check"
+            echo "==============================="
+
+            CERT_HEALTHY="true"
+
+            # Check if certificate file exists
+            if [ -f "ssl/live/$DOMAIN/fullchain.pem" ]; then
+              echo "✅ Certificate file exists"
+
+              # Get certificate details
+              CERT_EXPIRY=$(openssl x509 -in ssl/live/$DOMAIN/fullchain.pem -noout -dates | grep notAfter | cut -d= -f2)
+              CERT_EXPIRY_EPOCH=$(date -d "$CERT_EXPIRY" +%s 2>/dev/null || echo "0")
+              CURRENT_EPOCH=$(date +%s)
+
+              if [ "$CERT_EXPIRY_EPOCH" -gt 0 ]; then
+                DAYS_UNTIL_EXPIRY=$(( (CERT_EXPIRY_EPOCH - CURRENT_EPOCH) / 86400 ))
+
+                echo "📅 Certificate expires: $CERT_EXPIRY"
+                echo "⏰ Days until expiry: $DAYS_UNTIL_EXPIRY"
+
+                # Check expiration status
+                if [ $DAYS_UNTIL_EXPIRY -gt 30 ]; then
+                  echo "✅ Certificate expiration: HEALTHY ($DAYS_UNTIL_EXPIRY days)"
+                elif [ $DAYS_UNTIL_EXPIRY -gt 7 ]; then
+                  echo "⚠️ Certificate expiration: WARNING ($DAYS_UNTIL_EXPIRY days)"
+                  CERT_HEALTHY="false"
+                elif [ $DAYS_UNTIL_EXPIRY -gt 0 ]; then
+                  echo "🚨 Certificate expiration: CRITICAL ($DAYS_UNTIL_EXPIRY days)"
+                  CERT_HEALTHY="false"
+                else
+                  echo "💀 Certificate expiration: EXPIRED"
+                  CERT_HEALTHY="false"
+                fi
+
+                # Set GitHub outputs
+                echo "days_until_expiry=$DAYS_UNTIL_EXPIRY" >> $GITHUB_OUTPUT
+                echo "cert_expiry=$CERT_EXPIRY" >> $GITHUB_OUTPUT
+              else
+                echo "❌ Cannot parse certificate expiration date"
+                CERT_HEALTHY="false"
+              fi
+
+              # Verify certificate validity
+              if openssl x509 -in ssl/live/$DOMAIN/fullchain.pem -noout -checkend 86400 >/dev/null 2>&1; then
+                echo "✅ Certificate is valid for next 24 hours"
+              else
+                echo "🚨 Certificate expires within 24 hours!"
+                CERT_HEALTHY="false"
+              fi
+
+              # Check certificate issuer
+              CERT_ISSUER=$(openssl x509 -in ssl/live/$DOMAIN/fullchain.pem -noout -issuer | sed 's/.*CN=\([^,]*\).*/\1/')
+              echo "🏢 Certificate issuer: $CERT_ISSUER"
+
+              if echo "$CERT_ISSUER" | grep -qi "let's encrypt"; then
+                echo "✅ Using Let's Encrypt (trusted certificate)"
+                echo "cert_type=letsencrypt" >> $GITHUB_OUTPUT
+              else
+                echo "⚠️ Using non-Let's Encrypt certificate (may be self-signed)"
+                echo "cert_type=other" >> $GITHUB_OUTPUT
+              fi
+
+            else
+              echo "❌ Certificate file not found"
+              CERT_HEALTHY="false"
+            fi
+
+            echo "cert_healthy=$CERT_HEALTHY" >> $GITHUB_OUTPUT
+          EOF
+
+      - name: Check service health
+        id: service-health
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          EXPECTED_SERVICES: ${{ env.EXPECTED_SERVICES }}
+        run: |
+          ssh $DO_USER@$DO_HOST << 'EOF'
+            cd /opt/fano-stt
+
+            echo ""
+            echo "🏥 Service Health Check"
+            echo "======================"
+
+            SERVICES_HEALTHY="true"
+
+            # Check if docker-compose file exists
+            if [ ! -f "docker-compose.ssl.yml" ]; then
+              echo "❌ docker-compose.ssl.yml not found"
+              SERVICES_HEALTHY="false"
+            else
+              echo "✅ docker-compose.ssl.yml found"
+            fi
+
+            # Get service status
+            echo "📊 Service Status:"
+            SERVICE_STATUS=$(docker compose -f docker-compose.ssl.yml ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "ERROR: Cannot get service status")
+            echo "$SERVICE_STATUS"
+
+            # Count running services
+            RUNNING_SERVICES=$(docker compose -f docker-compose.ssl.yml ps | grep "Up" | wc -l)
+            echo "🔢 Running services: $RUNNING_SERVICES/$EXPECTED_SERVICES"
+
+            if [ "$RUNNING_SERVICES" -eq "$EXPECTED_SERVICES" ]; then
+              echo "✅ All expected services are running"
+            elif [ "$RUNNING_SERVICES" -gt 0 ]; then
+              echo "⚠️ Some services are not running ($RUNNING_SERVICES/$EXPECTED_SERVICES)"
+              SERVICES_HEALTHY="false"
+            else
+              echo "🚨 No services are running"
+              SERVICES_HEALTHY="false"
+            fi
+
+            # Check individual service health
+            echo "🔍 Individual Service Health:"
+
+            # Check nginx
+            if docker compose -f docker-compose.ssl.yml ps nginx | grep -q "Up"; then
+              echo "✅ nginx: Running"
+            else
+              echo "❌ nginx: Not running"
+              SERVICES_HEALTHY="false"
+            fi
+
+            # Check fano-stt-app
+            if docker compose -f docker-compose.ssl.yml ps fano-stt-app | grep -q "Up"; then
+              echo "✅ fano-stt-app: Running"
+            else
+              echo "❌ fano-stt-app: Not running"
+              SERVICES_HEALTHY="false"
+            fi
+
+            # Check fano-proxy
+            if docker compose -f docker-compose.ssl.yml ps fano-proxy | grep -q "Up"; then
+              echo "✅ fano-proxy: Running"
+            else
+              echo "❌ fano-proxy: Not running"
+              SERVICES_HEALTHY="false"
+            fi
+
+            # Check resource usage
+            echo "💻 Resource Usage:"
+            MEMORY_USAGE=$(free -h | grep "Mem:" | awk '{print $3 "/" $2}')
+            DISK_USAGE=$(df -h / | tail -1 | awk '{print $5 " (" $3 "/" $2 ")"}')
+            echo "Memory: $MEMORY_USAGE"
+            echo "Disk: $DISK_USAGE"
+
+            echo "services_healthy=$SERVICES_HEALTHY" >> $GITHUB_OUTPUT
+            echo "running_services=$RUNNING_SERVICES" >> $GITHUB_OUTPUT
+          EOF
+
+      - name: Check endpoint health
+        id: endpoint-health
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DOMAIN: ${{ env.DOMAIN }}
+        run: |
+          ssh $DO_USER@$DO_HOST << 'EOF'
+            cd /opt/fano-stt
+
+            echo ""
+            echo "🌐 Endpoint Health Check"
+            echo "======================="
+
+            ENDPOINTS_HEALTHY="true"
+
+            # Test HTTPS health endpoint
+            echo "🔒 Testing HTTPS health endpoint..."
+            if curl -f --max-time 10 --connect-timeout 5 https://$DOMAIN/health >/dev/null 2>&1; then
+              echo "✅ HTTPS /health endpoint: OK"
+
+              # Get response time
+              HTTPS_TIME=$(curl -w "%{time_total}" -s -o /dev/null --max-time 10 https://$DOMAIN/health)
+              echo "⏱️ HTTPS response time: ${HTTPS_TIME}s"
+
+            else
+              echo "❌ HTTPS /health endpoint: FAILED"
+              ENDPOINTS_HEALTHY="false"
+            fi
+
+            # Test HTTP redirect
+            echo "🔄 Testing HTTP to HTTPS redirect..."
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 http://$DOMAIN/health 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "301" ] || [ "$HTTP_CODE" = "302" ]; then
+              echo "✅ HTTP redirect: OK (code: $HTTP_CODE)"
+            else
+              echo "❌ HTTP redirect: FAILED (code: $HTTP_CODE)"
+              ENDPOINTS_HEALTHY="false"
+            fi
+
+            # Test main application page
+            echo "📱 Testing main application page..."
+            if curl -f --max-time 15 --connect-timeout 5 https://$DOMAIN/ >/dev/null 2>&1; then
+              echo "✅ Main application page: OK"
+            else
+              echo "❌ Main application page: FAILED"
+              ENDPOINTS_HEALTHY="false"
+            fi
+
+            # Test SSL connection
+            echo "🔐 Testing SSL connection..."
+            SSL_TEST=$(echo | openssl s_client -servername $DOMAIN -connect $DOMAIN:443 2>/dev/null | grep "Verification" || echo "FAILED")
+            if echo "$SSL_TEST" | grep -q "OK"; then
+              echo "✅ SSL connection: VERIFIED"
+            else
+              echo "⚠️ SSL connection: $SSL_TEST"
+            fi
+
+            echo "endpoints_healthy=$ENDPOINTS_HEALTHY" >> $GITHUB_OUTPUT
+          EOF
+
+      - name: Detailed performance check
+        if: github.event.inputs.detailed_check == 'true'
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DOMAIN: ${{ env.DOMAIN }}
+        run: |
+          ssh $DO_USER@$DO_HOST << 'EOF'
+            cd /opt/fano-stt
+
+            echo ""
+            echo "⚡ Detailed Performance Check"
+            echo "============================"
+
+            # Multiple response time tests
+            echo "🚀 Response Time Analysis:"
+            for i in {1..5}; do
+              TIME=$(curl -w "%{time_total}" -s -o /dev/null --max-time 10 https://$DOMAIN/health)
+              echo "Test $i: ${TIME}s"
+            done
+
+            # Check Docker container stats
+            echo "📊 Container Resource Usage:"
+            docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"
+
+            # Check recent logs for errors
+            echo "📋 Recent Error Logs:"
+            ERROR_COUNT=$(docker compose -f docker-compose.ssl.yml logs --since=1h 2>/dev/null | grep -i error | wc -l)
+            echo "Errors in last hour: $ERROR_COUNT"
+
+            if [ "$ERROR_COUNT" -gt 0 ]; then
+              echo "Recent errors found:"
+              docker compose -f docker-compose.ssl.yml logs --since=1h 2>/dev/null | grep -i error | tail -5
+            fi
+          EOF
+
+      - name: Check logs and generate report
+        id: generate-report
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+        run: |
+          ssh $DO_USER@$DO_HOST << 'EOF'
+            cd /opt/fano-stt
+
+            echo ""
+            echo "📋 Health Check Report Generation"
+            echo "================================"
+
+            # Create health check report
+            REPORT_FILE="logs/health-check-$(date +%Y%m%d_%H%M%S).log"
+
+            cat > "$REPORT_FILE" << REPORT_EOF
+SSL Health Check Report
+Generated: $(date)
+Domain: $DOMAIN
+
+Certificate Status:
+- File exists: $([ -f "ssl/live/$DOMAIN/fullchain.pem" ] && echo "YES" || echo "NO")
+- Days until expiry: $([ -f "ssl/live/$DOMAIN/fullchain.pem" ] && openssl x509 -in ssl/live/$DOMAIN/fullchain.pem -noout -dates | grep notAfter | cut -d= -f2 | xargs -I {} bash -c 'echo $(( ($(date -d "{}" +%s) - $(date +%s)) / 86400 ))' || echo "N/A")
+
+Service Status:
+$(docker compose -f docker-compose.ssl.yml ps 2>/dev/null || echo "Cannot get service status")
+
+System Resources:
+- Memory: $(free -h | grep "Mem:" | awk '{print $3 "/" $2}')
+- Disk: $(df -h / | tail -1 | awk '{print $5 " (" $3 "/" $2 ")"}')
+
+HTTPS Test: $(curl -f --max-time 5 https://$DOMAIN/health >/dev/null 2>&1 && echo "PASS" || echo "FAIL")
+HTTP Redirect: $([ "$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://$DOMAIN/health)" = "301" ] && echo "PASS" || echo "FAIL")
+
+REPORT_EOF
+
+            echo "✅ Health check report saved: $REPORT_FILE"
+
+            # Keep only last 7 days of health reports
+            find logs/ -name "health-check-*.log" -mtime +7 -delete 2>/dev/null || true
+
+            # Log the health check in main log
+            echo "$(date): Automated health check completed via GitHub Actions" >> logs/ssl-renewal.log
+          EOF
+
+      - name: Determine overall health status
+        id: overall-health
+        run: |
+          CERT_HEALTHY="${{ steps.cert-health.outputs.cert_healthy }}"
+          SERVICES_HEALTHY="${{ steps.service-health.outputs.services_healthy }}"
+          ENDPOINTS_HEALTHY="${{ steps.endpoint-health.outputs.endpoints_healthy }}"
+
+          if [ "$CERT_HEALTHY" = "true" ] && [ "$SERVICES_HEALTHY" = "true" ] && [ "$ENDPOINTS_HEALTHY" = "true" ]; then
+            echo "overall_status=healthy" >> $GITHUB_OUTPUT
+            echo "status_emoji=✅" >> $GITHUB_OUTPUT
+          else
+            echo "overall_status=unhealthy" >> $GITHUB_OUTPUT
+            echo "status_emoji=🚨" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Report healthy status
+        if: steps.overall-health.outputs.overall_status == 'healthy' && (github.event.inputs.notify_on_success == 'true' || github.event_name == 'workflow_dispatch')
+        run: |
+          echo "✅ SSL Health Check: ALL SYSTEMS HEALTHY"
+          echo ""
+          echo "📊 Health Summary:"
+          echo "=================="
+          echo "🔒 SSL Certificate: ✅ HEALTHY"
+          echo "   └─ Days until expiry: ${{ steps.cert-health.outputs.days_until_expiry }}"
+          echo "   └─ Type: ${{ steps.cert-health.outputs.cert_type }}"
+          echo "🏥 Services: ✅ HEALTHY"
+          echo "   └─ Running: ${{ steps.service-health.outputs.running_services }}/${{ env.EXPECTED_SERVICES }}"
+          echo "🌐 Endpoints: ✅ HEALTHY"
+          echo "   └─ HTTPS, redirects, and SSL all working"
+          echo ""
+          echo "🎉 Your FANO STT application is running perfectly!"
+
+      - name: Report unhealthy status and suggest fixes
+        if: steps.overall-health.outputs.overall_status == 'unhealthy'
+        run: |
+          echo "🚨 SSL Health Check: ISSUES DETECTED"
+          echo ""
+          echo "❌ Health Problems Found:"
+          echo "======================="
+
+          if [ "${{ steps.cert-health.outputs.cert_healthy }}" != "true" ]; then
+            echo "🔒 SSL Certificate: ❌ UNHEALTHY"
+            if [ -n "${{ steps.cert-health.outputs.days_until_expiry }}" ]; then
+              echo "   └─ Days until expiry: ${{ steps.cert-health.outputs.days_until_expiry }}"
+              if [ "${{ steps.cert-health.outputs.days_until_expiry }}" -lt 7 ]; then
+                echo "   └─ 🚨 URGENT: Certificate expires very soon!"
+                echo "   └─ 💡 Action: Run certificate renewal immediately"
+              fi
+            fi
+          fi
+
+          if [ "${{ steps.service-health.outputs.services_healthy }}" != "true" ]; then
+            echo "🏥 Services: ❌ UNHEALTHY"
+            echo "   └─ Running: ${{ steps.service-health.outputs.running_services }}/${{ env.EXPECTED_SERVICES }}"
+            echo "   └─ 💡 Action: Check service logs and restart if needed"
+          fi
+
+          if [ "${{ steps.endpoint-health.outputs.endpoints_healthy }}" != "true" ]; then
+            echo "🌐 Endpoints: ❌ UNHEALTHY"
+            echo "   └─ HTTPS or redirects not working properly"
+            echo "   └─ 💡 Action: Check nginx configuration and SSL setup"
+          fi
+
+          echo ""
+          echo "🛠️ Recommended Actions:"
+          echo "======================"
+          echo "1. SSH to server: ssh ${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}"
+          echo "2. Check logs: docker compose -f docker-compose.ssl.yml logs"
+          echo "3. Check services: docker compose -f docker-compose.ssl.yml ps"
+          echo "4. Restart if needed: docker compose -f docker-compose.ssl.yml restart"
+          echo "5. Renew certificates: ./renew-certificates.sh"
+          echo ""
+          echo "🆘 Emergency: Run deployment workflow to fix issues"
+
+      - name: Set job status based on health
+        if: steps.overall-health.outputs.overall_status == 'unhealthy'
+        run: |
+          echo "Health check failed - marking job as failed"
+          exit 1
+
+      - name: Update health check timestamp
+        if: always()
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+        run: |
+          ssh $DO_USER@$DO_HOST << EOF
+            cd /opt/fano-stt
+
+            # Update last health check timestamp
+            echo "$(date): Health check completed - Status: ${{ steps.overall-health.outputs.overall_status }}" >> logs/health-checks.log
+
+            # Keep only last 30 days of health check logs
+            if [ -f "logs/health-checks.log" ]; then
+              tail -1000 logs/health-checks.log > logs/health-checks.log.tmp
+              mv logs/health-checks.log.tmp logs/health-checks.log
+            fi
+          EOF

@@ -38,6 +38,18 @@ const nextConfig = {
             key: "Access-Control-Allow-Headers",
             value: "Content-Type, Authorization",
           },
+          {
+            key: "Cache-Control",
+            value: "no-cache, no-store, must-revalidate",
+          },
+          {
+            key: "Pragma",
+            value: "no-cache",
+          },
+          {
+            key: "Expires",
+            value: "0",
+          },
         ],
       },
     ];
@@ -50,6 +62,15 @@ const nextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   swcMinify: true,
+  // Cache busting configuration
+  generateEtags: false,
+  onDemandEntries: {
+    maxInactiveAge: 25 * 1000,
+    pagesBufferLength: 2,
+  },
+  generateBuildId: async () => {
+    return "build-" + Date.now().toString();
+  },
 };
 
 module.exports = nextConfig;

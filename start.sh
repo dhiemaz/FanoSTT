@@ -48,8 +48,8 @@ trap cleanup EXIT INT TERM
 print_status "Starting FANO STT Application with Podman Compose..."
 echo
 print_status "Services:"
-print_status "  📡 Proxy Server: ws://localhost:8080"
-print_status "  🌐 Web App: http://localhost:3001"
+print_status "  📡 Proxy Server: ws://10.104.0.2:8080"
+print_status "  🌐 Web App: http://143.198.192.233:3001"
 echo
 
 # Build and start services
@@ -65,8 +65,8 @@ if podman compose ps | grep -q "Up"; then
     print_success "Services are running!"
     echo
     print_success "🚀 FANO STT Application is ready!"
-    print_success "   Web Application: http://localhost:3001"
-    print_success "   Proxy Server: ws://localhost:8080"
+    print_success "   Web Application: http://143.198.192.233:3001"
+    print_success "   Proxy Server: ws://10.104.0.2:8080"
     echo
     print_status "View logs with: podman compose logs -f"
     print_status "Stop services with: podman compose down"

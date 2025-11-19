@@ -69,6 +69,12 @@ export default function HomePage() {
   // Manual audio level for testing
   const [manualAudioLevel, setManualAudioLevel] = useState<number | null>(null);
 
+  // Toast counter for unique IDs
+  const toastCounterRef = useRef<number>(0);
+
+  // Segment counter for unique transcript IDs
+  const segmentCounterRef = useRef<number>(0);
+
   // Microphone permission state
   const [micPermission, setMicPermission] = useState<
     "granted" | "denied" | "prompt" | "checking"
@@ -102,24 +108,27 @@ export default function HomePage() {
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
+  const hasScrolledToTranscriptRef = useRef<boolean>(false);
 
   // Toast management
+  const removeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   const showToast = useCallback(
     (type: Toast["type"], title: string, message: string) => {
-      const id = Date.now().toString();
+      toastCounterRef.current += 1;
+      const id = `toast-${Date.now()}-${toastCounterRef.current}`;
       const toast: Toast = { id, type, title, message };
       setToasts((prev) => [...prev, toast]);
 
       setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== id));
+        removeToast(id);
       }, 5000);
     },
-    [],
+    [removeToast],
   );
-
-  const removeToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
 
   // WebSocket message handler - moved up before hook initialization
   function handleWebSocketMessage(message: any) {
@@ -156,8 +165,9 @@ export default function HomePage() {
               `[FANO] Final transcript segment: "${transcript}" (${confidence.toFixed(3)})`,
             );
 
+            segmentCounterRef.current += 1;
             const segment: TranscriptSegment = {
-              id: `${Date.now()}-${Math.random()}`,
+              id: `segment-${Date.now()}-${segmentCounterRef.current}`,
               text: transcript,
               confidence,
               startTime: Date.now(),
@@ -181,7 +191,17 @@ export default function HomePage() {
                 (prev) => prev + (prev ? " " : "") + transcript,
               );
               setInterimTranscript("");
-              setTranscripts((prev) => [...prev, segment]);
+              setTranscripts((prev) => {
+                const newTranscripts = [...prev, segment];
+                // Scroll to transcript area on first transcript during recording
+                if (
+                  newTranscripts.length === 1 &&
+                  !hasScrolledToTranscriptRef.current
+                ) {
+                  setTimeout(() => scrollToFirstTranscript(), 100);
+                }
+                return newTranscripts;
+              });
             }
 
             // Log aggregated transcript progress for file uploads
@@ -201,6 +221,14 @@ export default function HomePage() {
             } else {
               // Normal operation
               setInterimTranscript(transcript);
+              // Scroll to transcript on first interim result if no final transcripts yet
+              if (
+                transcripts.length === 0 &&
+                transcript.trim() &&
+                !hasScrolledToTranscriptRef.current
+              ) {
+                setTimeout(() => scrollToFirstTranscript(), 100);
+              }
             }
           }
         }
@@ -800,6 +828,39 @@ export default function HomePage() {
     );
   }, [showToast]);
 
+  // Scroll to transcript area when recording starts
+  const scrollToTranscript = useCallback(() => {
+    if (transcriptContainerRef.current) {
+      transcriptContainerRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+
+      showToast(
+        "info",
+        "Ready to Transcribe",
+        "📝 Transcript area is now visible - start speaking!",
+      );
+    }
+  }, [showToast]);
+
+  // Scroll to transcript on first transcript received
+  const scrollToFirstTranscript = useCallback(() => {
+    if (!hasScrolledToTranscriptRef.current && transcriptContainerRef.current) {
+      hasScrolledToTranscriptRef.current = true;
+      transcriptContainerRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+
+      showToast(
+        "success",
+        "Transcription Started!",
+        "🎙️ Your speech is being transcribed below",
+      );
+    }
+  }, [showToast]);
+
   // File upload handlers
   const handleFileSelect = useCallback(
     (file: File) => {
@@ -1053,6 +1114,14 @@ export default function HomePage() {
     setBufferedFinalTranscript("");
     setBufferedInterimTranscript("");
 
+    // Reset scroll tracking for new recording
+    hasScrolledToTranscriptRef.current = false;
+
+    // Scroll to transcript area after a short delay
+    setTimeout(() => {
+      scrollToTranscript();
+    }, 1000);
+
     try {
       // Reset streaming statistics
       setChunksStreamed(0);
@@ -1123,7 +1192,14 @@ export default function HomePage() {
         showToast("error", "Recording Error", "An unexpected error occurred");
       }
     }
-  }, [connectionStatus.state, connect, sendMessage, startRecording, showToast]);
+  }, [
+    connectionStatus.state,
+    connect,
+    sendMessage,
+    startRecording,
+    showToast,
+    scrollToTranscript,
+  ]);
 
   const handleStopRecording = useCallback(() => {
     console.log("[FANO] Stopping recording and sending EOF...");
@@ -2070,7 +2146,10 @@ export default function HomePage() {
             transition={{ delay: 0.6, duration: 0.6 }}
             className="space-y-6"
           >
-            <div className="transcript-container h-96 overflow-y-auto">
+            <div
+              ref={transcriptContainerRef}
+              className="transcript-container h-96 overflow-y-auto scroll-mt-20"
+            >
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-white">
                   Live Transcript

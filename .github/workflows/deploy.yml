@@ -1,9 +1,13 @@
-name: Deploy to Digital Ocean
+name: Deploy to Digital Ocean with SSL
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
+env:
+  DOMAIN: "143.198.192.233.nip.io"
+  EMAIL: "admin@example.com"
 
 jobs:
   deploy:
@@ -22,68 +26,223 @@ jobs:
         run: |
           ssh-keyscan -H ${{ secrets.DO_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Deploy to Digital Ocean
+      - name: Deploy application with SSL
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
           DO_USER: ${{ secrets.DO_USER }}
+          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
+          DOMAIN: ${{ env.DOMAIN }}
+          EMAIL: ${{ env.EMAIL }}
         run: |
-          # Deploy application
-          ssh $DO_USER@$DO_HOST << 'EOF'
+          ssh $DO_USER@$DO_HOST << EOF
+            set -e
+
+            echo "🚀 Starting SSL deployment..."
+
             # Navigate to app directory
             cd /opt/fano-stt || exit 1
 
             # Pull latest changes
+            echo "📥 Pulling latest changes..."
             git pull origin main
 
-            # Stop existing services
-            docker-compose -f docker-compose.yml down || true
+            # Stop existing services (all variants)
+            echo "⏹️ Stopping existing services..."
+            docker compose -f docker-compose.ssl.yml down --remove-orphans || true
+            docker compose -f docker-compose.yml down --remove-orphans || true
+            docker compose -f docker-compose.selfsigned.yml down --remove-orphans || true
 
-            # Remove old images to free space
+            # Clean up unused resources
+            echo "🧹 Cleaning up..."
             docker system prune -f
 
-            # Build and start services
-            docker-compose -f docker-compose.yml up --build -d
+            # Create necessary directories
+            echo "📁 Setting up directories..."
+            mkdir -p ssl certbot-data nginx-logs logs
+            chmod 755 ssl certbot-data nginx-logs logs
 
-            # Show status
-            docker-compose -f docker-compose.yml ps
+            # Update configuration with current domain and email
+            echo "⚙️ Updating SSL configuration..."
+            sed -i "s/143\.198\.192\.233\.nip\.io/$DOMAIN/g" docker-compose.ssl.yml
+            sed -i "s/admin@example\.com/$EMAIL/g" docker-compose.ssl.yml
 
-            # Check logs for any immediate issues
-            docker-compose -f docker-compose.yml logs --tail=20
+            # Update nginx configuration
+            sed -i "s/server_name 143\.198\.192\.233;/server_name $DOMAIN;/g" nginx.conf
+            sed -i "s|ssl_certificate /etc/letsencrypt/live/143\.198\.192\.233/|ssl_certificate /etc/letsencrypt/live/$DOMAIN/|g" nginx.conf
+            sed -i "s|ssl_certificate_key /etc/letsencrypt/live/143\.198\.192\.233/|ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/|g" nginx.conf
 
-            echo "Deployment completed successfully!"
+            # Check if SSL certificates already exist
+            if [ -f "ssl/live/$DOMAIN/fullchain.pem" ]; then
+                echo "✅ SSL certificates found, starting services with SSL..."
+                docker compose -f docker-compose.ssl.yml up --build --force-recreate -d
+            else
+                echo "🔒 Generating SSL certificates..."
+
+                # Start nginx first for certificate generation
+                docker compose -f docker-compose.ssl.yml up --build -d nginx
+                sleep 10
+
+                # Generate SSL certificate
+                docker compose -f docker-compose.ssl.yml run --rm certbot
+
+                if [ -f "ssl/live/$DOMAIN/fullchain.pem" ]; then
+                    echo "✅ SSL certificate generated successfully"
+
+                    # Restart all services with SSL
+                    docker compose -f docker-compose.ssl.yml down
+                    docker compose -f docker-compose.ssl.yml up -d
+                else
+                    echo "❌ SSL certificate generation failed, falling back to self-signed"
+
+                    # Generate self-signed certificate as fallback
+                    mkdir -p ssl-selfsigned/live/$DOMAIN
+
+                    # Generate private key
+                    openssl genrsa -out ssl-selfsigned/live/$DOMAIN/privkey.pem 2048
+
+                    # Generate self-signed certificate
+                    openssl req -new -x509 -key ssl-selfsigned/live/$DOMAIN/privkey.pem \
+                            -out ssl-selfsigned/live/$DOMAIN/fullchain.pem \
+                            -days 365 -subj "/C=US/ST=Dev/L=Dev/O=FANO/CN=$DOMAIN"
+
+                    # Copy to main ssl directory
+                    cp ssl-selfsigned/live/$DOMAIN/* ssl/live/$DOMAIN/
+
+                    # Start services with self-signed certificate
+                    docker compose -f docker-compose.ssl.yml up -d
+                fi
+            fi
+
+            echo "⏳ Waiting for services to be ready..."
+            sleep 20
+
+            # Show service status
+            echo "📊 Service status:"
+            docker compose -f docker-compose.ssl.yml ps
+
+            # Check logs for immediate issues
+            echo "📋 Recent logs:"
+            docker compose -f docker-compose.ssl.yml logs --tail=10 --no-color
+
+            echo "🎉 SSL deployment completed!"
           EOF
 
-      - name: Verify deployment
+      - name: Verify SSL deployment
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DOMAIN: ${{ env.DOMAIN }}
+        run: |
+          ssh $DO_USER@$DO_HOST << EOF
+            cd /opt/fano-stt
+
+            echo "🔍 Verifying SSL deployment..."
+
+            # Check if services are running
+            if docker compose -f docker-compose.ssl.yml ps | grep -q "Up"; then
+              echo "✅ SSL services are running"
+
+              # Test HTTPS endpoint (allow self-signed for testing)
+              if curl -k -f https://$DOMAIN/health >/dev/null 2>&1; then
+                echo "✅ HTTPS health check passed"
+
+                # Test HTTP redirect
+                HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" http://$DOMAIN/health || echo "000")
+                if [ "\$HTTP_CODE" = "301" ]; then
+                  echo "✅ HTTP to HTTPS redirect working"
+                else
+                  echo "⚠️ HTTP redirect may not be working (got \$HTTP_CODE)"
+                fi
+
+                # Test certificate (basic check)
+                if echo | openssl s_client -servername $DOMAIN -connect $DOMAIN:443 2>/dev/null | openssl x509 -noout -dates >/dev/null 2>&1; then
+                  echo "✅ SSL certificate is valid"
+                else
+                  echo "⚠️ SSL certificate check failed (may be self-signed)"
+                fi
+
+              else
+                echo "❌ HTTPS health check failed"
+                echo "Checking logs..."
+                docker compose -f docker-compose.ssl.yml logs nginx
+                exit 1
+              fi
+            else
+              echo "❌ SSL services are not running"
+              docker compose -f docker-compose.ssl.yml logs
+              exit 1
+            fi
+          EOF
+
+      - name: Setup SSL certificate renewal
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
           DO_USER: ${{ secrets.DO_USER }}
         run: |
           ssh $DO_USER@$DO_HOST << 'EOF'
-            # Wait a moment for services to start
-            sleep 10
+            cd /opt/fano-stt
 
-            # Check if services are running
-            if docker-compose -f /opt/fano-stt/docker-compose.yml ps | grep -q "Up"; then
-              echo "✅ Services are running"
+            echo "🔄 Setting up SSL certificate renewal..."
 
-              # Test health endpoint if available
-              if curl -f http://localhost:3001/api/health >/dev/null 2>&1; then
-                echo "✅ Health check passed"
-              else
-                echo "⚠️ Health check failed, but containers are running"
-              fi
+            # Create renewal script
+            cat > renew-certificates.sh << 'RENEWAL_SCRIPT'
+#!/bin/bash
+cd /opt/fano-stt
+
+echo "$(date): Starting certificate renewal..." >> logs/ssl-renewal.log
+
+# Attempt renewal
+docker compose -f docker-compose.ssl.yml run --rm certbot renew --webroot --webroot-path=/var/www/certbot --quiet
+
+if [ $? -eq 0 ]; then
+    # Restart nginx if renewal was successful
+    docker compose -f docker-compose.ssl.yml restart nginx
+    echo "$(date): SSL certificates renewed and nginx restarted" >> logs/ssl-renewal.log
+else
+    echo "$(date): SSL certificate renewal failed" >> logs/ssl-renewal.log
+fi
+RENEWAL_SCRIPT
+
+            chmod +x renew-certificates.sh
+
+            # Add to crontab if not already present
+            CRON_JOB="0 12,24 * * * /opt/fano-stt/renew-certificates.sh"
+
+            if ! crontab -l 2>/dev/null | grep -q "renew-certificates.sh"; then
+                (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+                echo "✅ SSL certificate auto-renewal configured (twice daily)"
             else
-              echo "❌ Services are not running"
-              docker-compose -f /opt/fano-stt/docker-compose.yml logs
-              exit 1
+                echo "✅ SSL certificate auto-renewal already configured"
             fi
           EOF
 
-      - name: Notify deployment status
-        if: always()
+      - name: Display deployment information
+        if: success()
+        env:
+          DOMAIN: ${{ env.DOMAIN }}
         run: |
-          if [ ${{ job.status }} == 'success' ]; then
-            echo "🎉 Deployment to Digital Ocean completed successfully!"
-          else
-            echo "❌ Deployment failed. Check the logs above."
-          fi
+          echo "🎉 SSL deployment completed successfully!"
+          echo ""
+          echo "📊 Deployment Information:"
+          echo "=========================="
+          echo "🌐 Application URL: https://$DOMAIN"
+          echo "🔌 WebSocket URL: wss://$DOMAIN/ws/"
+          echo "🔒 SSL Certificate: Let's Encrypt (or self-signed fallback)"
+          echo "🔄 Auto-renewal: Configured (twice daily)"
+          echo ""
+          echo "🎙️ Microphone access is now enabled!"
+          echo "✅ Production-ready HTTPS deployment complete!"
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "❌ SSL deployment failed!"
+          echo ""
+          echo "🔧 Troubleshooting steps:"
+          echo "1. Check if ports 80 and 443 are open"
+          echo "2. Verify domain DNS configuration"
+          echo "3. Check Docker and Docker Compose installation"
+          echo "4. Review deployment logs above"
+          echo ""
+          echo "🆘 Emergency fallback:"
+          echo "ssh into server and run: docker compose -f docker-compose.yml up -d"

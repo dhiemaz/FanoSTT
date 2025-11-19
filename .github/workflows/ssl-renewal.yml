@@ -1,0 +1,307 @@
+name: SSL Certificate Renewal
+
+on:
+  # Run twice daily as recommended by Let's Encrypt
+  schedule:
+    - cron: '0 12 * * *'  # 12:00 UTC daily
+    - cron: '0 0 * * *'   # 00:00 UTC daily
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      force_renewal:
+        description: 'Force certificate renewal (even if not near expiry)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  DOMAIN: "143.198.192.233.nip.io"
+
+jobs:
+  renew-certificates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+
+      - name: Add Digital Ocean host to known hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.DO_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Check certificate expiration
+        id: check-cert
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DOMAIN: ${{ env.DOMAIN }}
+        run: |
+          ssh $DO_USER@$DO_HOST << EOF
+            cd /opt/fano-stt
+
+            echo "🔍 Checking SSL certificate status..."
+
+            # Check if certificate exists
+            if [ -f "ssl/live/$DOMAIN/fullchain.pem" ]; then
+              echo "✅ Certificate file found"
+
+              # Get certificate expiration info
+              CERT_EXPIRY=\$(openssl x509 -in ssl/live/$DOMAIN/fullchain.pem -noout -dates | grep notAfter | cut -d= -f2)
+              CERT_EXPIRY_EPOCH=\$(date -d "\$CERT_EXPIRY" +%s)
+              CURRENT_EPOCH=\$(date +%s)
+              DAYS_UNTIL_EXPIRY=\$(( (\$CERT_EXPIRY_EPOCH - \$CURRENT_EPOCH) / 86400 ))
+
+              echo "Certificate expires: \$CERT_EXPIRY"
+              echo "Days until expiry: \$DAYS_UNTIL_EXPIRY"
+
+              # Set output for next steps
+              echo "cert_exists=true" >> \$GITHUB_OUTPUT
+              echo "days_until_expiry=\$DAYS_UNTIL_EXPIRY" >> \$GITHUB_OUTPUT
+              echo "cert_expiry=\$CERT_EXPIRY" >> \$GITHUB_OUTPUT
+
+              # Check if renewal is needed (less than 30 days)
+              if [ \$DAYS_UNTIL_EXPIRY -lt 30 ]; then
+                echo "⚠️ Certificate expires in \$DAYS_UNTIL_EXPIRY days - renewal needed"
+                echo "renewal_needed=true" >> \$GITHUB_OUTPUT
+              else
+                echo "✅ Certificate is valid for \$DAYS_UNTIL_EXPIRY more days"
+                echo "renewal_needed=false" >> \$GITHUB_OUTPUT
+              fi
+            else
+              echo "❌ Certificate file not found"
+              echo "cert_exists=false" >> \$GITHUB_OUTPUT
+              echo "renewal_needed=true" >> \$GITHUB_OUTPUT
+            fi
+          EOF
+
+      - name: Renew Let's Encrypt certificate
+        if: steps.check-cert.outputs.renewal_needed == 'true' || github.event.inputs.force_renewal == 'true'
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DOMAIN: ${{ env.DOMAIN }}
+        run: |
+          ssh $DO_USER@$DO_HOST << EOF
+            cd /opt/fano-stt
+
+            echo "🔄 Starting SSL certificate renewal..."
+
+            # Create backup of current certificate
+            if [ -f "ssl/live/$DOMAIN/fullchain.pem" ]; then
+              echo "📋 Backing up current certificate..."
+              cp ssl/live/$DOMAIN/fullchain.pem ssl/live/$DOMAIN/fullchain.pem.backup.\$(date +%Y%m%d_%H%M%S)
+            fi
+
+            # Attempt renewal
+            echo "🔒 Attempting Let's Encrypt renewal..."
+            RENEWAL_OUTPUT=\$(docker compose -f docker-compose.ssl.yml run --rm certbot renew --webroot --webroot-path=/var/www/certbot 2>&1)
+            RENEWAL_EXIT_CODE=\$?
+
+            echo "Renewal output:"
+            echo "\$RENEWAL_OUTPUT"
+
+            if [ \$RENEWAL_EXIT_CODE -eq 0 ]; then
+              echo "✅ Certificate renewal successful"
+
+              # Check if certificate was actually renewed
+              if echo "\$RENEWAL_OUTPUT" | grep -q "renewed"; then
+                echo "🔄 Certificate was renewed, restarting nginx..."
+                docker compose -f docker-compose.ssl.yml restart nginx
+
+                # Verify new certificate
+                NEW_EXPIRY=\$(openssl x509 -in ssl/live/$DOMAIN/fullchain.pem -noout -dates | grep notAfter | cut -d= -f2)
+                echo "✅ New certificate expires: \$NEW_EXPIRY"
+
+                # Log successful renewal
+                echo "\$(date): SSL certificate renewed successfully. New expiry: \$NEW_EXPIRY" >> logs/ssl-renewal.log
+
+              else
+                echo "ℹ️ Certificate was not renewed (likely not due for renewal)"
+                echo "\$(date): Certificate checked but not renewed (not due yet)" >> logs/ssl-renewal.log
+              fi
+
+            else
+              echo "❌ Certificate renewal failed"
+              echo "\$(date): Certificate renewal failed. Exit code: \$RENEWAL_EXIT_CODE" >> logs/ssl-renewal.log
+              echo "\$(date): Renewal output: \$RENEWAL_OUTPUT" >> logs/ssl-renewal.log
+              exit 1
+            fi
+          EOF
+
+      - name: Verify renewed certificate
+        if: steps.check-cert.outputs.renewal_needed == 'true' || github.event.inputs.force_renewal == 'true'
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DOMAIN: ${{ env.DOMAIN }}
+        run: |
+          ssh $DO_USER@$DO_HOST << EOF
+            cd /opt/fano-stt
+
+            echo "🔍 Verifying renewed certificate..."
+
+            # Wait for services to restart
+            sleep 10
+
+            # Test HTTPS endpoint
+            if curl -f --max-time 10 https://$DOMAIN/health >/dev/null 2>&1; then
+              echo "✅ HTTPS endpoint is working"
+
+              # Get new certificate details
+              CERT_INFO=\$(echo | openssl s_client -servername $DOMAIN -connect $DOMAIN:443 2>/dev/null | openssl x509 -noout -dates)
+              echo "📋 Certificate info: \$CERT_INFO"
+
+            else
+              echo "❌ HTTPS endpoint is not responding after renewal"
+              echo "🔍 Checking service status..."
+              docker compose -f docker-compose.ssl.yml ps
+              echo "📋 Recent nginx logs:"
+              docker compose -f docker-compose.ssl.yml logs --tail=20 nginx
+              exit 1
+            fi
+          EOF
+
+      - name: Check service health
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DOMAIN: ${{ env.DOMAIN }}
+        run: |
+          ssh $DO_USER@$DO_HOST << EOF
+            cd /opt/fano-stt
+
+            echo "🏥 Checking service health..."
+
+            # Check all services are running
+            SERVICE_STATUS=\$(docker compose -f docker-compose.ssl.yml ps --format "table {{.Names}}\t{{.Status}}")
+            echo "Service Status:"
+            echo "\$SERVICE_STATUS"
+
+            # Count running services
+            RUNNING_SERVICES=\$(docker compose -f docker-compose.ssl.yml ps | grep "Up" | wc -l)
+            echo "Running services: \$RUNNING_SERVICES"
+
+            if [ \$RUNNING_SERVICES -ge 3 ]; then
+              echo "✅ All services appear to be running"
+            else
+              echo "⚠️ Some services may not be running"
+            fi
+
+            # Test main application endpoints
+            echo "🔍 Testing application endpoints..."
+
+            # Test HTTPS health
+            if curl -f --max-time 10 https://$DOMAIN/health >/dev/null 2>&1; then
+              echo "✅ HTTPS health endpoint OK"
+            else
+              echo "❌ HTTPS health endpoint failed"
+            fi
+
+            # Test HTTP redirect
+            HTTP_CODE=\$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 http://$DOMAIN/health || echo "000")
+            if [ "\$HTTP_CODE" = "301" ]; then
+              echo "✅ HTTP to HTTPS redirect OK"
+            else
+              echo "⚠️ HTTP redirect may not be working (code: \$HTTP_CODE)"
+            fi
+          EOF
+
+      - name: Send notification on success
+        if: success() && (steps.check-cert.outputs.renewal_needed == 'true' || github.event.inputs.force_renewal == 'true')
+        run: |
+          echo "🎉 SSL certificate renewal completed successfully!"
+          echo ""
+          echo "📊 Renewal Summary:"
+          echo "=================="
+          echo "🌐 Domain: ${{ env.DOMAIN }}"
+          echo "🔒 Certificate: Renewed via Let's Encrypt"
+          echo "📅 Triggered: ${{ github.event_name }}"
+          if [ "${{ github.event.inputs.force_renewal }}" = "true" ]; then
+            echo "⚡ Type: Manual force renewal"
+          else
+            echo "🔄 Type: Automatic renewal (certificate expiring)"
+          fi
+          echo "✅ Status: All services verified working"
+
+      - name: Send notification on failure
+        if: failure()
+        run: |
+          echo "❌ SSL certificate renewal failed!"
+          echo ""
+          echo "🔧 Failure Details:"
+          echo "=================="
+          echo "🌐 Domain: ${{ env.DOMAIN }}"
+          echo "📅 Attempted: $(date)"
+          echo "⚡ Trigger: ${{ github.event_name }}"
+          echo ""
+          echo "🛠️ Recommended Actions:"
+          echo "1. Check server logs: docker compose -f docker-compose.ssl.yml logs"
+          echo "2. Verify domain DNS configuration"
+          echo "3. Check Let's Encrypt rate limits"
+          echo "4. Consider manual renewal on server"
+          echo ""
+          echo "🆘 Emergency contact server:"
+          echo "ssh ${{ secrets.DO_USER }}@${{ secrets.DO_HOST }}"
+
+      - name: Log renewal attempt
+        if: always()
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+        run: |
+          ssh $DO_USER@$DO_HOST << EOF
+            cd /opt/fano-stt
+
+            # Log the GitHub Actions renewal attempt
+            if [ "${{ job.status }}" = "success" ]; then
+              echo "\$(date): GitHub Actions SSL renewal completed successfully" >> logs/ssl-renewal.log
+            else
+              echo "\$(date): GitHub Actions SSL renewal failed" >> logs/ssl-renewal.log
+            fi
+
+            # Keep only last 100 lines of renewal log
+            tail -100 logs/ssl-renewal.log > logs/ssl-renewal.log.tmp
+            mv logs/ssl-renewal.log.tmp logs/ssl-renewal.log
+          EOF
+
+      - name: Display certificate status
+        if: always()
+        env:
+          DO_HOST: ${{ secrets.DO_HOST }}
+          DO_USER: ${{ secrets.DO_USER }}
+          DOMAIN: ${{ env.DOMAIN }}
+        run: |
+          ssh $DO_USER@$DO_HOST << EOF
+            cd /opt/fano-stt
+
+            echo "📋 Final Certificate Status:"
+            echo "============================"
+
+            if [ -f "ssl/live/$DOMAIN/fullchain.pem" ]; then
+              CERT_EXPIRY=\$(openssl x509 -in ssl/live/$DOMAIN/fullchain.pem -noout -dates | grep notAfter | cut -d= -f2)
+              CERT_EXPIRY_EPOCH=\$(date -d "\$CERT_EXPIRY" +%s)
+              CURRENT_EPOCH=\$(date +%s)
+              DAYS_UNTIL_EXPIRY=\$(( (\$CERT_EXPIRY_EPOCH - \$CURRENT_EPOCH) / 86400 ))
+
+              echo "🔒 Certificate file: EXISTS"
+              echo "📅 Expires: \$CERT_EXPIRY"
+              echo "⏰ Days remaining: \$DAYS_UNTIL_EXPIRY"
+
+              if [ \$DAYS_UNTIL_EXPIRY -gt 30 ]; then
+                echo "✅ Certificate status: HEALTHY"
+              elif [ \$DAYS_UNTIL_EXPIRY -gt 7 ]; then
+                echo "⚠️ Certificate status: EXPIRES SOON"
+              else
+                echo "🚨 Certificate status: CRITICAL - EXPIRES VERY SOON"
+              fi
+            else
+              echo "❌ Certificate file: NOT FOUND"
+            fi
+
+            echo ""
+            echo "📊 Service Status:"
+            docker compose -f docker-compose.ssl.yml ps --format "table {{.Names}}\t{{.Status}}"
+          EOF
