@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Default values
 IMAGE_NAME="fano-stt"
 CONTAINER_NAME="fano-stt-app"
-PORT=${PORT:-3000}
+PORT=${PORT:-3001}
 
 # Detect container runtime (Docker or Podman)
 if command -v podman > /dev/null 2>&1; then
@@ -64,7 +64,7 @@ build_image() {
 
 # Function to stop existing container
 stop_container() {
-    if $CONTAINER_CMD ps -q -f name=$CONTAINER_NAME > /dev/null 2>&1; then
+    if $CONTAINER_CMD ps -aq -f name=^${CONTAINER_NAME}$ | grep -q .; then
         print_info "Stopping existing container..."
         $CONTAINER_CMD stop $CONTAINER_NAME > /dev/null 2>&1
         $CONTAINER_CMD rm $CONTAINER_NAME > /dev/null 2>&1
@@ -155,7 +155,7 @@ main() {
             run_container
             ;;
         "logs")
-            if $CONTAINER_CMD ps -q -f name=$CONTAINER_NAME > /dev/null 2>&1; then
+            if $CONTAINER_CMD ps -q -f name=^${CONTAINER_NAME}$ | grep -q .; then
                 show_logs
             else
                 print_error "Container is not running"
@@ -163,9 +163,9 @@ main() {
             fi
             ;;
         "status")
-            if $CONTAINER_CMD ps -q -f name=$CONTAINER_NAME > /dev/null 2>&1; then
+            if $CONTAINER_CMD ps -q -f name=^${CONTAINER_NAME}$ | grep -q .; then
                 print_success "Container is running"
-                $CONTAINER_CMD ps -f name=$CONTAINER_NAME --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+                $CONTAINER_CMD ps -f name=^${CONTAINER_NAME}$ --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
             else
                 print_warning "Container is not running"
             fi

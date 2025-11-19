@@ -3,9 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently \"node proxy-server.js\" \"next dev\"",
+    "dev:proxy": "node proxy-server.js",
+    "dev:next": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "concurrently \"node proxy-server.js\" \"next start\"",
+    "start:proxy": "node proxy-server.js",
+    "start:next": "next start",
     "lint": "next lint"
   },
   "dependencies": {
@@ -36,6 +40,8 @@
     "eslint-config-next": "14.0.4",
     "postcss": "^8.4.32",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5",
+    "ws": "^8.14.2",
+    "concurrently": "^8.2.2"
   }
 }

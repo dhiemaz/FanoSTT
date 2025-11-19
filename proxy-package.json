@@ -1,0 +1,29 @@
+{
+  "name": "fano-stt-proxy",
+  "version": "1.0.0",
+  "description": "WebSocket proxy server for FANO STT with Authorization header support",
+  "main": "proxy-server.js",
+  "scripts": {
+    "start": "node proxy-server.js",
+    "dev": "nodemon proxy-server.js"
+  },
+  "keywords": [
+    "websocket",
+    "proxy",
+    "fano",
+    "stt",
+    "speech-to-text",
+    "authorization"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

@@ -28,6 +28,7 @@ import {
   TranscriptSegment,
   DEFAULT_STT_CONFIG,
   SUPPORTED_AUDIO_FORMATS,
+  ConnectionState,
 } from "@/types";
 import {
   isValidAudioFormat,
@@ -59,6 +60,7 @@ export default function HomePage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [finalTranscript, setFinalTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
+  const [useQueryAuth, setUseQueryAuth] = useState(true);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -82,8 +84,10 @@ export default function HomePage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // WebSocket message handler
+  // WebSocket message handler - moved up before hook initialization
   function handleWebSocketMessage(message: any) {
+    console.log("📨 [FANO MESSAGE] Received message:", message);
+
     if (message.event === "response" && message.data?.results) {
       const results = message.data.results;
 
@@ -114,38 +118,65 @@ export default function HomePage() {
     }
 
     if (message.data?.error) {
+      console.error("❌ [FANO] STT Error:", message.data.error);
       showToast("error", "Transcription Error", message.data.error.message);
       setIsProcessing(false);
     }
   }
 
-  // Audio chunk handler for real-time recording
-  const handleAudioChunk = useCallback((chunk: any) => {
-    if (connectionStatus.state === "connected") {
-      const int16Data = new Int16Array(chunk.data);
-      const base64Data = audioBufferToBase64(int16Data);
-
-      const message: FanoSTTRequest = {
-        event: "request",
-        data: {
-          audioContent: base64Data,
-        },
-      };
-
-      sendMessage(message);
-    }
-  }, []);
-
-  // Custom hooks
+  // Custom hooks - moved down after message handler
   const { connectionStatus, sendMessage, connect, disconnect, lastMessage } =
     useWebSocket({
       onMessage: handleWebSocketMessage,
-      onError: (error) => showToast("error", "Connection Error", error.message),
-      onConnect: () =>
-        showToast("success", "Connected", "WebSocket connection established"),
-      onDisconnect: () =>
-        showToast("warning", "Disconnected", "WebSocket connection lost"),
+      onError: (error) => {
+        console.error("❌ [FANO] WebSocket error:", error);
+        showToast("error", "Connection Error", error.message);
+      },
+      onConnect: () => {
+        console.log("✅ [FANO] Connected with token in URL");
+        showToast("success", "Connected", "FANO STT connection established");
+      },
+      onDisconnect: () => {
+        console.log("🔌 [FANO] Disconnected");
+        showToast("warning", "Disconnected", "FANO STT connection lost");
+      },
     });
+
+  // Connection test function
+  const testConnection = useCallback(() => {
+    console.log("🧪 [FANO] Testing connection...");
+
+    if (connectionStatus.state === "connected") {
+      disconnect();
+      setTimeout(() => connect(), 1000);
+    } else {
+      connect();
+    }
+
+    showToast("info", "Testing Connection", "Testing FANO STT connection...");
+  }, [connectionStatus.state, connect, disconnect, showToast]);
+
+  // Audio chunk handler for real-time recording
+  const handleAudioChunk = useCallback(
+    (chunk: any) => {
+      if (connectionStatus.state === "connected") {
+        const int16Data = new Int16Array(chunk.data);
+        const base64Data = audioBufferToBase64(int16Data);
+
+        const message: FanoSTTRequest = {
+          event: "request",
+          data: {
+            audioContent: base64Data,
+          },
+        };
+
+        sendMessage(message);
+      }
+    },
+    [connectionStatus.state, sendMessage],
+  );
+
+  // Audio recorder hook
 
   const {
     isRecording,
@@ -219,7 +250,14 @@ export default function HomePage() {
 
   // Process uploaded file
   const processUploadedFile = useCallback(async () => {
-    if (!selectedFile || connectionStatus.state !== "connected") return;
+    if (!selectedFile || connectionStatus.state !== "connected") {
+      showToast(
+        "warning",
+        "Not Connected",
+        "Please wait for connection to be established",
+      );
+      return;
+    }
 
     setIsProcessing(true);
     setTranscripts([]);
@@ -227,16 +265,30 @@ export default function HomePage() {
     setUploadProgress(0);
 
     try {
-      // Send initial configuration
+      // Send initial configuration with specific Fano STT format
       const configMessage: FanoSTTRequest = {
         event: "request",
         data: {
           streamingConfig: {
-            config: DEFAULT_STT_CONFIG,
+            config: {
+              languageCode: "en-SG-x-multi",
+              sampleRateHertz: 16000,
+              encoding: "LINEAR16",
+              enableAutomaticPunctuation: true,
+              singleUtterance: false,
+              interimResults: true,
+            },
           },
         },
       };
 
+      console.log(
+        "📤 [FANO AUTH] Sending file processing config (requires auth token):",
+        configMessage,
+      );
+      console.log(
+        "📤 [FANO AUTH] Using authenticated connection for file processing",
+      );
       sendMessage(configMessage);
 
       // Get audio metadata
@@ -270,8 +322,19 @@ export default function HomePage() {
           },
         };
 
+        console.log(
+          `📤 [FANO AUTH] Sending audio chunk ${i + 1}/${chunks.length} via authenticated connection`,
+        );
         sendMessage(chunkMessage);
         setUploadProgress(Math.round(((i + 1) / chunks.length) * 100));
+
+        // Log progress every 10 chunks
+        if (i % 10 === 0) {
+          console.log(
+            `📤 [FANO AUTH] Progress: ${i + 1}/${chunks.length} chunks sent using bearer token`,
+          );
+        }
+
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
 
@@ -281,6 +344,13 @@ export default function HomePage() {
         data: "EOF",
       };
 
+      console.log(
+        "📤 [FANO AUTH] Sending EOF message via authenticated connection:",
+        eofMessage,
+      );
+      console.log(
+        "📤 [FANO AUTH] File processing complete - all data sent with valid auth token",
+      );
       sendMessage(eofMessage);
       audioContext.close();
       showToast("success", "Upload Complete", "File processed successfully");
@@ -295,26 +365,72 @@ export default function HomePage() {
 
   // Recording controls
   const handleStartRecording = useCallback(async () => {
+    console.log(
+      "Starting recording, connection state:",
+      connectionStatus.state,
+    );
+
     if (connectionStatus.state !== "connected") {
+      console.log("Not connected, attempting to connect...");
+      showToast("info", "Connecting", "Establishing connection to Fano STT...");
       connect();
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      // Wait for connection with timeout
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      while (attempts < maxAttempts) {
+        if ((connectionStatus.state as ConnectionState) === "connected") break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        attempts++;
+      }
+
+      if ((connectionStatus.state as ConnectionState) !== "connected") {
+        showToast(
+          "error",
+          "Connection Failed",
+          "Unable to establish connection to Fano STT. Please check your network.",
+        );
+        return;
+      }
     }
 
     const configMessage: FanoSTTRequest = {
       event: "request",
       data: {
         streamingConfig: {
-          config: DEFAULT_STT_CONFIG,
+          config: {
+            languageCode: "en-SG-x-multi",
+            sampleRateHertz: 16000,
+            encoding: "LINEAR16",
+            enableAutomaticPunctuation: true,
+            singleUtterance: false,
+            interimResults: true,
+          },
         },
       },
     };
 
+    console.log(
+      "📤 [FANO AUTH] Sending recording config (requires valid bearer token):",
+      configMessage,
+    );
+    console.log(
+      "📤 [FANO AUTH] Starting real-time transcription with authenticated connection",
+    );
     sendMessage(configMessage);
     setTranscripts([]);
     setFinalTranscript("");
     setInterimTranscript("");
-    await startRecording();
-  }, [connectionStatus.state, connect, sendMessage, startRecording]);
+
+    try {
+      await startRecording();
+      console.log("Recording started successfully");
+    } catch (error) {
+      console.error("Failed to start recording:", error);
+      showToast("error", "Recording Error", "Failed to start recording");
+    }
+  }, [connectionStatus.state, connect, sendMessage, startRecording, showToast]);
 
   const handleStopRecording = useCallback(() => {
     stopRecording();
@@ -335,39 +451,34 @@ export default function HomePage() {
     }
   }, [transcripts, interimTranscript]);
 
-  // Connect on mount
-  useEffect(() => {
-    if (connectionStatus.state === "disconnected") {
-      connect();
-    }
-  }, [connectionStatus.state, connect]);
+  // Auto-connect on mount disabled
 
   const renderConnectionStatus = () => {
     const statusConfig = {
       connected: {
         color: "text-green-400",
-        bg: "bg-green-400/20",
+        bg: "bg-green-500/10",
         text: "Connected",
       },
       connecting: {
         color: "text-yellow-400",
-        bg: "bg-yellow-400/20",
-        text: "Connecting...",
+        bg: "bg-yellow-500/10",
+        text: "Connecting",
       },
       reconnecting: {
         color: "text-orange-400",
-        bg: "bg-orange-400/20",
-        text: "Reconnecting...",
+        bg: "bg-orange-500/10",
+        text: "Reconnecting",
       },
       disconnected: {
         color: "text-red-400",
-        bg: "bg-red-400/20",
+        bg: "bg-red-500/10",
         text: "Disconnected",
       },
-      error: { color: "text-red-400", bg: "bg-red-400/20", text: "Error" },
+      error: { color: "text-red-400", bg: "bg-red-500/10", text: "Error" },
     };
 
-    const config = statusConfig[connectionStatus.state];
+    const config = statusConfig[connectionStatus.state] || statusConfig.error;
 
     return (
       <div
@@ -486,6 +597,13 @@ export default function HomePage() {
         >
           <div className="flex items-center space-x-6">
             {renderConnectionStatus()}
+            <button
+              onClick={testConnection}
+              className="px-3 py-1.5 text-xs font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-full hover:bg-blue-500/20 transition-colors"
+              title="Test FANO STT connection and auth token"
+            >
+              🧪 Test Auth
+            </button>
             {isRecording && (
               <div className="flex items-center space-x-2 text-red-400">
                 <div className="w-3 h-3 bg-red-400 rounded-full animate-pulse"></div>

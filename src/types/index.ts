@@ -3,12 +3,26 @@ export interface FanoAuth {
   type: "bearer";
   token: string;
   header_name: "authorization";
+  method?: "query" | "message";
 }
 
 // WebSocket message types
 export interface FanoWSMessage {
-  event: "request" | "response" | "error" | "close";
+  event: "request" | "response" | "error" | "close" | "auth" | "ping" | "pong";
   data: any;
+}
+
+export interface FanoPingMessage {
+  event: "ping";
+  timestamp: number;
+}
+
+export interface FanoPongResponse {
+  event: "response";
+  data: {
+    pong: true;
+    timestamp: number;
+  };
 }
 
 export interface FanoSTTConfig {
@@ -38,17 +52,19 @@ export interface StreamingConfig {
 }
 
 export interface FanoSTTRequest {
-  event: "request";
+  event: "request" | "auth" | "ping";
   data:
     | {
         streamingConfig?: StreamingConfig;
         audioContent?: string;
       }
-    | "EOF";
+    | "EOF"
+    | { Authorization?: string }
+    | { timestamp: number };
 }
 
 export interface FanoSTTResponse {
-  event: "response";
+  event: "response" | "error";
   data: {
     results?: Array<{
       alternatives: Array<{
@@ -71,6 +87,8 @@ export interface FanoSTTResponse {
       details?: any;
     };
     speechEventType?: "SPEECH_EVENT_UNSPECIFIED" | "END_OF_SINGLE_UTTERANCE";
+    pong?: boolean;
+    timestamp?: number;
   };
 }
 
@@ -179,6 +197,7 @@ export interface WebSocketConfig {
   reconnectAttempts: number;
   reconnectInterval: number;
   heartbeatInterval?: number;
+  useQueryAuth?: boolean;
 }
 
 export interface ConnectionStatus {
@@ -394,8 +413,7 @@ export const DEFAULT_STT_CONFIG: FanoSTTConfig = {
   profanityFilter: false,
 } as const;
 
-export const WEBSOCKET_URL =
-  "wss://ocbc-poc.fano.ai/speech/streaming-recognize";
+export const WEBSOCKET_URL = "ws://localhost:8080";
 
 export const AUTH_TOKEN =
   "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJmYW5vX2RlbmllZF9hY2Nlc3MiOlsiY2FsbGludGVyOndvcmtzcGFjZS0qIiwiY2FsbGludGVyOnZvaWNlcHJpbnQtKiIsImNhbGxpbnRlcjp3b3JkLWNsb3VkLSoiLCJjYWxsaW50ZXI6cHJvLXNlYXJjaC1hbmQtc2F2ZS1xdWVyeSIsImNhbGxpbnRlcjp3b3Jrc3BhY2Utbm90aWZpY2F0aW9uLXRhcmdldCIsImNhbGxpbnRlcjpub3RpZmljYXRpb24tdGFyZ2V0IiwiSW50ZW50OioiLCJQb3J0YWw6c3VwZXItdXNlciJdLCJmYW5vX3NwZWVjaF9kaWFyaXplX3F1b3RhX3N0cmF0ZWd5IjoiZGVmYXVsdCIsImZhbm9fc3BlZWNoX2dlbmVyYXRlX3ZvaWNlcHJpbnRfcXVvdGFfc3RyYXRlZ3kiOiJkZWZhdWx0IiwiZmFub19zcGVlY2hfcmVjb2duaXplX3F1b3RhX3N0cmF0ZWd5IjoiZGVmYXVsdCIsImZhbm9fc3BlZWNoX3N0cmVhbWluZ19kZXRlY3RfYWN0aXZpdHlfcXVvdGFfc3RyYXRlZ3kiOiJkZWZhdWx0IiwiZmFub19zcGVlY2hfc3RyZWFtaW5nX3JlY29nbml6ZV9xdW90YV9zdHJhdGVneSI6ImRlZmF1bHQiLCJmYW5vX3NwZWVjaF9yZXBsYWNlX3BocmFzZXNfcXVvdGFfc3RyYXRlZ3kiOiJkZWZhdWx0IiwiZmFub19zcGVlY2hfc3ludGhlc2l6ZV9zcGVlY2hfcXVvdGFfc3RyYXRlZ3kiOiJkZWZhdWx0IiwiaWF0IjoxNzYyNzM4ODg3LCJleHAiOjE3NjUzODI0MDAsImF1ZCI6InRlbXAtb2NiYy1ydHN0dC1wb2MiLCJzdWIiOiJPQ0JDIiwiaXNzIjoiaHR0cHM6Ly9hdXRoLmZhbm8uYWkifQ.Gj3qIyhD2aZvNADKSlOPKnI4w8dMgEDcgiybx8vGn5xTSdYeBw_d9AiyoCjOQb0m-FAJRRL73ykXYLV_Q5EjzvCt4Kmigdb40N5aFCssQ2rq0yUry2rxhT84eBNptfwOy6SJPoZOTkrTm026W8DkFOzNO_NxFWJLmjMZiRfJAGhOBmfEZlDJxmfTaVNKWC-qD2b-p09JoXsRU7hOcvHrmST7igbEwiHunA9ig1T9dfFoxPulMCsIDl7VsCK_AbbjWWpAJ2mkqjyDyzMLlTxBKbVIKX_s8V9dG9VgiHzCGTBiV4uuoiAsoupJ7GOdov6xmvdG2UMVuUv1yh3D78JTSA";
