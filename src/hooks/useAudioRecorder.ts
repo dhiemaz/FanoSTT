@@ -15,9 +15,11 @@ interface UseAudioRecorderOptions {
   chunkDuration?: number;
   enableVisualization?: boolean;
   onAudioChunk?: (chunk: AudioChunk) => void;
+  onIntervalAudio?: (intervalAudio: Int16Array, duration: number) => void;
   onRecordingComplete?: (completeAudio: Int16Array, duration: number) => void;
   onError?: (error: AudioProcessingError) => void;
   onStateChange?: (state: RecordingState) => void;
+  intervalDuration?: number; // Duration in seconds for interval sending
 }
 
 export function useAudioRecorder({
@@ -27,9 +29,11 @@ export function useAudioRecorder({
   chunkDuration = 100, // ms
   enableVisualization = true,
   onAudioChunk,
+  onIntervalAudio,
   onRecordingComplete,
   onError,
   onStateChange,
+  intervalDuration = 5, // 5 seconds default
 }: UseAudioRecorderOptions = {}): UseAudioRecorderReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -54,6 +58,11 @@ export function useAudioRecorder({
   const recordingStartTimeRef = useRef<number>(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const backupLevelIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 5-second interval audio sending
+  const intervalAudioBufferRef = useRef<Int16Array[]>([]);
+  const intervalTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastIntervalTimeRef = useRef<number>(0);
 
   // Refs for current recording state (to avoid closure issues)
   const isRecordingRef = useRef<boolean>(false);
@@ -130,6 +139,79 @@ export function useAudioRecorder({
     return btoa(binary);
   }, []);
 
+  // Send accumulated audio from interval buffer
+  const sendIntervalAudio = useCallback(() => {
+    if (intervalAudioBufferRef.current.length === 0) {
+      console.log("[INTERVAL AUDIO] No audio data to send");
+      return;
+    }
+
+    try {
+      // Merge all interval chunks
+      const totalLength = intervalAudioBufferRef.current.reduce(
+        (sum, chunk) => sum + chunk.length,
+        0,
+      );
+
+      const intervalAudio = new Int16Array(totalLength);
+      let offset = 0;
+
+      intervalAudioBufferRef.current.forEach((chunk) => {
+        intervalAudio.set(chunk, offset);
+        offset += chunk.length;
+      });
+
+      const currentTime = Date.now();
+      const duration = currentTime - lastIntervalTimeRef.current;
+
+      console.log(
+        `[INTERVAL AUDIO] Sending ${intervalDuration}s audio segment:`,
+        {
+          samples: intervalAudio.length,
+          duration: duration,
+          chunks: intervalAudioBufferRef.current.length,
+        },
+      );
+
+      // Send to parent component
+      onIntervalAudio?.(intervalAudio, duration);
+
+      // Clear the interval buffer and update timestamp
+      intervalAudioBufferRef.current = [];
+      lastIntervalTimeRef.current = currentTime;
+    } catch (error) {
+      console.error("[INTERVAL AUDIO] Failed to send interval audio:", error);
+    }
+  }, [intervalDuration, onIntervalAudio]);
+
+  // Setup interval timer for audio sending
+  const setupIntervalTimer = useCallback(() => {
+    if (intervalTimerRef.current) {
+      clearInterval(intervalTimerRef.current);
+    }
+
+    lastIntervalTimeRef.current = Date.now();
+
+    intervalTimerRef.current = setInterval(() => {
+      if (isRecordingRef.current && !isPausedRef.current) {
+        sendIntervalAudio();
+      }
+    }, intervalDuration * 1000);
+
+    console.log(
+      `[INTERVAL AUDIO] Timer set up for ${intervalDuration}s intervals`,
+    );
+  }, [intervalDuration, sendIntervalAudio]);
+
+  // Cleanup interval timer
+  const cleanupIntervalTimer = useCallback(() => {
+    if (intervalTimerRef.current) {
+      clearInterval(intervalTimerRef.current);
+      intervalTimerRef.current = null;
+    }
+    intervalAudioBufferRef.current = [];
+  }, []);
+
   // Backup audio level detection using direct stream analysis
   const setupBackupAudioLevelDetection = useCallback(() => {
     if (!mediaStreamRef.current) return;
@@ -171,7 +253,7 @@ export function useAudioRecorder({
         const tracks = mediaStreamRef.current.getAudioTracks();
         if (tracks.length > 0) {
           const track = tracks[0];
-          if (track.readyState === "live") {
+          if (track && track.readyState === "live") {
             // Simulate audio level based on track activity
             const simulatedLevel = Math.random() * 0.4 + 0.1;
             console.log(
@@ -243,7 +325,10 @@ export function useAudioRecorder({
         // Store chunk in complete audio buffer
         completeAudioBufferRef.current.push(int16Data);
 
-        // Notify parent component
+        // Store chunk in interval buffer for 5-second sending
+        intervalAudioBufferRef.current.push(int16Data);
+
+        // Notify parent component (for real-time feedback if needed)
         onAudioChunk?.(chunk);
 
         // Calculate audio level for immediate feedback from raw audio data
@@ -349,7 +434,7 @@ export function useAudioRecorder({
         let sum = 0;
         let maxSample = 0;
         for (let i = 0; i < timeData.length; i++) {
-          const sample = (timeData[i] - 128) / 128; // Normalize to -1 to 1
+          const sample = ((timeData[i] || 128) - 128) / 128; // Normalize to -1 to 1
           sum += sample * sample;
           maxSample = Math.max(maxSample, Math.abs(sample));
         }
@@ -528,6 +613,7 @@ export function useAudioRecorder({
 
     stopTimer();
     cleanupBackupAudioDetection();
+    cleanupIntervalTimer();
 
     if (processorRef.current) {
       processorRef.current.disconnect();
@@ -556,9 +642,10 @@ export function useAudioRecorder({
 
     audioBufferRef.current = [];
     completeAudioBufferRef.current = [];
+    intervalAudioBufferRef.current = [];
     setAudioLevel(0);
     setAudioData(undefined);
-  }, [stopTimer, cleanupBackupAudioDetection]);
+  }, [stopTimer, cleanupBackupAudioDetection, cleanupIntervalTimer]);
 
   // Start recording
   const startRecording = useCallback(async (): Promise<void> => {
@@ -592,6 +679,9 @@ export function useAudioRecorder({
         hasSource: !!sourceRef.current,
         audioContextState: audioContextRef.current?.state,
       });
+
+      // Setup interval timer for 5-second audio sending
+      setupIntervalTimer();
 
       // Setup visualization with a small delay to ensure everything is connected
       if (enableVisualization && analyserRef.current) {
@@ -634,6 +724,13 @@ export function useAudioRecorder({
 
     if (visualizationFrameRef.current) {
       cancelAnimationFrame(visualizationFrameRef.current);
+      visualizationFrameRef.current = undefined;
+    }
+
+    // Send any remaining interval audio before stopping
+    if (wasRecording && intervalAudioBufferRef.current.length > 0) {
+      console.log("[INTERVAL AUDIO] Sending final interval audio before stop");
+      sendIntervalAudio();
     }
 
     // Process complete recording if we were actually recording
@@ -668,7 +765,14 @@ export function useAudioRecorder({
 
     updateState("stopped");
     cleanup();
-  }, [isRecording, stopTimer, cleanup, updateState, onRecordingComplete]);
+  }, [
+    isRecording,
+    stopTimer,
+    cleanup,
+    updateState,
+    onRecordingComplete,
+    sendIntervalAudio,
+  ]);
 
   // Pause recording
   const pauseRecording = useCallback(() => {
@@ -677,6 +781,12 @@ export function useAudioRecorder({
     setIsPaused(true);
     isPausedRef.current = true;
     stopTimer();
+
+    // Send any buffered interval audio before pausing
+    if (intervalAudioBufferRef.current.length > 0) {
+      console.log("[INTERVAL AUDIO] Sending buffered audio before pause");
+      sendIntervalAudio();
+    }
 
     if (visualizationFrameRef.current) {
       cancelAnimationFrame(visualizationFrameRef.current);
@@ -701,12 +811,22 @@ export function useAudioRecorder({
 
     updateState("recording");
 
+    // Restart interval timer on resume
+    setupIntervalTimer();
+
     // Restart visualization on resume
     if (enableVisualization && analyserRef.current) {
       console.log("[AUDIO VIZ] Restarting visualization on resume");
       setupVisualization();
     }
-  }, [isRecording, isPaused, startTimer, setupVisualization, updateState]);
+  }, [
+    isRecording,
+    isPaused,
+    startTimer,
+    setupVisualization,
+    updateState,
+    setupIntervalTimer,
+  ]);
 
   // Cleanup on unmount
   useEffect(() => {

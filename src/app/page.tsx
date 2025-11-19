@@ -64,7 +64,7 @@ export default function HomePage() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [hasActiveRequest, setHasActiveRequest] = useState(false);
   const [isSendingFile, setIsSendingFile] = useState(false);
-  const [isSendingCompleteAudio, setIsSendingCompleteAudio] = useState(false);
+  // 5-second interval audio sending - no loading state needed
 
   // Manual audio level for testing
   const [manualAudioLevel, setManualAudioLevel] = useState<number | null>(null);
@@ -525,18 +525,17 @@ export default function HomePage() {
     }
   }, []);
 
-  // Handle complete recording when recording stops
-  const handleRecordingComplete = useCallback(
-    async (completeAudio: Int16Array, duration: number) => {
+  // Handle interval audio sending (every 5 seconds during recording)
+  const handleIntervalAudio = useCallback(
+    async (intervalAudio: Int16Array, duration: number) => {
       try {
-        setIsSendingCompleteAudio(true);
         console.log(
-          `[FANO COMPLETE] Processing complete recording: ${completeAudio.length} samples, ${duration}ms`,
+          `[FANO INTERVAL] Processing 5s audio segment: ${intervalAudio.length} samples, ${duration}ms`,
         );
 
         if (connectionStatus.state === "connected") {
-          // Convert complete audio to base64
-          const bytes = new Uint8Array(completeAudio.buffer);
+          // Convert interval audio to base64
+          const bytes = new Uint8Array(intervalAudio.buffer);
           let binary = "";
           const chunkSize = 0x8000; // 32KB chunks to avoid call stack overflow
 
@@ -550,8 +549,8 @@ export default function HomePage() {
 
           const base64Audio = btoa(binary);
 
-          // Send complete audio as a single message
-          const completeAudioMessage: FanoSTTRequest = {
+          // Send interval audio
+          const intervalAudioMessage: FanoSTTRequest = {
             event: "request",
             data: {
               audioContent: base64Audio,
@@ -559,41 +558,46 @@ export default function HomePage() {
           };
 
           console.log(
-            `[FANO COMPLETE] Sending complete audio recording (${base64Audio.length} chars base64)`,
+            `[FANO INTERVAL] Sending 5s audio segment (${base64Audio.length} chars base64)`,
           );
-          setLastRequest(completeAudioMessage);
-          sendMessage(completeAudioMessage);
+          setLastRequest(intervalAudioMessage);
+          sendMessage(intervalAudioMessage);
 
           showToast(
-            "success",
-            "Complete Recording Sent",
-            `🎙️ Sent ${Math.round(duration / 1000)}s recording to FANO STT`,
+            "info",
+            "Audio Segment Sent",
+            `📤 Sent 5s audio segment to FANO STT`,
           );
         } else {
           console.warn(
-            "[FANO COMPLETE] Not connected, cannot send complete recording",
-          );
-          showToast(
-            "warning",
-            "Connection Lost",
-            "Complete recording couldn't be sent - connection lost",
+            "[FANO INTERVAL] Not connected, cannot send interval audio",
           );
         }
       } catch (error) {
         console.error(
-          "[FANO COMPLETE] Failed to process complete recording:",
+          "[FANO INTERVAL] Failed to process interval audio:",
           error,
         );
-        showToast(
-          "error",
-          "Processing Error",
-          "Failed to process complete recording",
-        );
-      } finally {
-        setIsSendingCompleteAudio(false);
       }
     },
     [connectionStatus.state, sendMessage, showToast],
+  );
+
+  // Handle complete recording when recording stops (now just for logging)
+  const handleRecordingComplete = useCallback(
+    async (completeAudio: Int16Array, duration: number) => {
+      console.log(
+        `[FANO COMPLETE] Recording completed: ${completeAudio.length} samples, ${Math.round(duration / 1000)}s duration`,
+      );
+
+      // Complete audio is no longer sent, only used for statistics
+      showToast(
+        "success",
+        "Recording Complete",
+        `🎙️ Recorded ${Math.round(duration / 1000)}s of audio`,
+      );
+    },
+    [showToast],
   );
 
   const {
@@ -609,7 +613,9 @@ export default function HomePage() {
     error: recordingError,
   } = useAudioRecorder({
     onAudioChunk: handleAudioChunkPlaceholder,
+    onIntervalAudio: handleIntervalAudio,
     onRecordingComplete: handleRecordingComplete,
+    intervalDuration: 5, // Send audio every 5 seconds
     onError: (error) => {
       showToast("error", "Recording Error", error.message);
       if (
@@ -1120,11 +1126,9 @@ export default function HomePage() {
   }, [connectionStatus.state, connect, sendMessage, startRecording, showToast]);
 
   const handleStopRecording = useCallback(() => {
-    console.log(
-      "[FANO] Stopping recording and preparing to send complete audio...",
-    );
+    console.log("[FANO] Stopping recording and sending EOF...");
 
-    // Stop the recording (this will trigger onRecordingComplete callback)
+    // Stop the recording (this will send any remaining interval audio)
     stopRecording();
 
     // Reset recovery state
@@ -1138,24 +1142,22 @@ export default function HomePage() {
     setBufferedFinalTranscript("");
     setBufferedInterimTranscript("");
 
-    // Send EOF after a short delay to ensure complete audio is sent first
-    setTimeout(() => {
-      if (connectionStatus.state === "connected") {
-        const eofMessage: FanoSTTRequest = {
-          event: "request",
-          data: "EOF",
-        };
+    // Send EOF immediately after stopping
+    if (connectionStatus.state === "connected") {
+      const eofMessage: FanoSTTRequest = {
+        event: "request",
+        data: "EOF",
+      };
 
-        console.log(
-          "[FANO AUTH] Sending EOF after complete recording:",
-          eofMessage,
-        );
-        setLastRequest(eofMessage);
-        sendMessage(eofMessage);
-      }
-    }, 500); // 500ms delay to ensure complete audio is sent first
+      console.log(
+        "[FANO AUTH] Sending EOF to complete transcription:",
+        eofMessage,
+      );
+      setLastRequest(eofMessage);
+      sendMessage(eofMessage);
+    }
 
-    showToast("success", "Recording Stopped", "Transcription completed");
+    showToast("success", "Recording Stopped", "🔴 Transcription completed");
   }, [stopRecording, connectionStatus.state, sendMessage, showToast]);
 
   const handlePauseRecording = useCallback(() => {
@@ -1980,23 +1982,16 @@ export default function HomePage() {
                               micPermission === "prompt"
                             ) {
                               setShowMicModal(true);
-                            } else if (
-                              connectionStatus.state === "connected" &&
-                              !isSendingCompleteAudio
-                            ) {
+                            } else if (connectionStatus.state === "connected") {
                               handleStartRecording();
                             }
                           }}
                           className="relative group"
-                          disabled={
-                            connectionStatus.state !== "connected" ||
-                            isSendingCompleteAudio
-                          }
+                          disabled={connectionStatus.state !== "connected"}
                         >
                           <div
                             className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 group-hover:scale-105 ${
-                              connectionStatus.state !== "connected" ||
-                              isSendingCompleteAudio
+                              connectionStatus.state !== "connected"
                                 ? "bg-gray-500 cursor-not-allowed"
                                 : micPermission === "denied" ||
                                     micPermission === "prompt"
@@ -2004,11 +1999,7 @@ export default function HomePage() {
                                   : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
                             }`}
                           >
-                            {isSendingCompleteAudio ? (
-                              <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              <MicrophoneIconSolid className="w-8 h-8 text-white" />
-                            )}
+                            <MicrophoneIconSolid className="w-8 h-8 text-white" />
                           </div>
                           {connectionStatus.state === "connected" &&
                             micPermission !== "denied" && (
@@ -2024,12 +2015,7 @@ export default function HomePage() {
                                 ? handleResumeRecording
                                 : handlePauseRecording
                             }
-                            disabled={isSendingCompleteAudio}
-                            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 ${
-                              isSendingCompleteAudio
-                                ? "bg-gray-500 cursor-not-allowed"
-                                : "bg-gradient-to-br from-blue-500 to-blue-600 hover:shadow-blue-500/30 hover:shadow-xl"
-                            }`}
+                            className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-blue-500 to-blue-600 hover:shadow-blue-500/30 hover:shadow-xl"
                           >
                             {isPaused ? (
                               <PlayIcon className="w-6 h-6 text-white ml-1" />
@@ -2041,18 +2027,9 @@ export default function HomePage() {
                           {/* Stop Button */}
                           <button
                             onClick={handleStopRecording}
-                            disabled={isSendingCompleteAudio}
-                            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 ${
-                              isSendingCompleteAudio
-                                ? "bg-gray-500 cursor-not-allowed"
-                                : "bg-gradient-to-br from-gray-600 to-gray-700 hover:shadow-gray-500/30 hover:shadow-xl"
-                            }`}
+                            className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-gray-600 to-gray-700 hover:shadow-gray-500/30 hover:shadow-xl"
                           >
-                            {isSendingCompleteAudio ? (
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              <StopIcon className="w-5 h-5 text-white" />
-                            )}
+                            <StopIcon className="w-5 h-5 text-white" />
                           </button>
                         </div>
                       )}
@@ -2060,30 +2037,23 @@ export default function HomePage() {
 
                     <div className="text-center mt-4">
                       <p className="text-sm text-white/60">
-                        {isSendingCompleteAudio
-                          ? "📤 Sending complete recording to FANO STT..."
-                          : !isRecording
-                            ? micPermission === "denied"
-                              ? "🎙️ Click to enable microphone access"
-                              : micPermission === "prompt"
-                                ? "🎤 Click to request microphone permission"
-                                : micPermission === "checking"
-                                  ? "⏳ Requesting microphone access..."
-                                  : connectionStatus.state === "connected"
-                                    ? "🎙️ Click to start live recording"
-                                    : "🔌 Connecting to FANO STT..."
-                            : isPaused
-                              ? "⏸️ Recording paused - click to resume"
-                              : "🔴 Recording in progress..."}
+                        {!isRecording
+                          ? micPermission === "denied"
+                            ? "🎙️ Click to enable microphone access"
+                            : micPermission === "prompt"
+                              ? "🎤 Click to request microphone permission"
+                              : micPermission === "checking"
+                                ? "⏳ Requesting microphone access..."
+                                : connectionStatus.state === "connected"
+                                  ? "🎙️ Click to start live recording"
+                                  : "🔌 Connecting to FANO STT..."
+                          : isPaused
+                            ? "⏸️ Recording paused - click to resume"
+                            : "🔴 Recording in progress..."}
                       </p>
                       {isRecording && (
                         <div className="mt-2 text-xs text-white/40">
-                          Streaming to FANO STT in real-time
-                        </div>
-                      )}
-                      {isSendingCompleteAudio && (
-                        <div className="mt-2 text-xs text-blue-400 animate-pulse">
-                          Processing complete audio recording...
+                          Sending 5-second audio segments to FANO STT
                         </div>
                       )}
                     </div>
