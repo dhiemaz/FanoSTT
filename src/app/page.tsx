@@ -28,6 +28,9 @@ import {
   DEFAULT_STT_CONFIG,
   SUPPORTED_AUDIO_FORMATS,
   ConnectionState,
+  createSTTConfigForFile,
+  getEncodingFromExtension,
+  getEncodingFromMimeType,
 } from "@/types";
 import {
   isValidAudioFormat,
@@ -933,19 +936,13 @@ export default function HomePage() {
     setIsSendingFile(true); // Mark as sending file
 
     try {
-      // Send initial configuration with specific Fano STT format
+      // Send initial configuration with dynamic encoding based on file type
+      const dynamicConfig = createSTTConfigForFile(selectedFile);
       const configMessage: FanoSTTRequest = {
         event: "request",
         data: {
           streamingConfig: {
-            config: {
-              languageCode: "en-SG-x-multi",
-              sampleRateHertz: 16000,
-              encoding: "LINEAR16",
-              enableAutomaticPunctuation: true,
-              singleUtterance: false,
-              interimResults: true,
-            },
+            config: dynamicConfig,
           },
         },
       };
@@ -953,6 +950,9 @@ export default function HomePage() {
       console.log(
         "[FANO AUTH] Sending file processing config (requires auth token):",
         configMessage,
+      );
+      console.log(
+        `[FILE PROCESSING] File: ${selectedFile.name}, Type: ${selectedFile.type}, Encoding: ${dynamicConfig.encoding}, Sample Rate: ${dynamicConfig.sampleRateHertz}Hz`,
       );
       console.log(
         "[FANO AUTH] Using authenticated connection for file processing",
@@ -1651,7 +1651,7 @@ export default function HomePage() {
                     </h3>
                     <p className="text-white/60 mb-6">
                       {selectedFile
-                        ? `${formatFileSize(selectedFile.size)} • Ready to process`
+                        ? `${formatFileSize(selectedFile.size)} • ${createSTTConfigForFile(selectedFile).encoding} encoding • Ready to process`
                         : "Or click to browse files"}
                     </p>
 

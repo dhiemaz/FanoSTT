@@ -35,7 +35,13 @@ export interface FanoSTTConfig {
     | "AMR"
     | "AMR_WB"
     | "OGG_OPUS"
-    | "SPEEX_WITH_HEADER_BYTE";
+    | "SPEEX_WITH_HEADER_BYTE"
+    | "MP3"
+    | "GSM"
+    | "GSM_MS"
+    | "AAC"
+    | "LINEAR8"
+    | "ALAW";
   enableAutomaticPunctuation: boolean;
   singleUtterance: boolean;
   interimResults: boolean;
@@ -394,13 +400,100 @@ export class AudioProcessingError extends Error {
 // Constants
 export const SUPPORTED_AUDIO_FORMATS = [
   "audio/wav",
-  "audio/mpeg",
   "audio/mp3",
   "audio/ogg",
   "audio/flac",
   "audio/m4a",
   "audio/aac",
 ] as const;
+
+// Audio file extension to Fano encoding mapping
+export const AUDIO_EXTENSION_TO_ENCODING = {
+  ".wav": "LINEAR16",
+  ".mp3": "MP3",
+  ".ogg": "OGG_OPUS",
+  ".flac": "FLAC",
+  ".m4a": "AAC",
+  ".aac": "AAC",
+} as const;
+
+// Audio MIME type to Fano encoding mapping
+export const AUDIO_MIME_TO_ENCODING = {
+  "audio/wav": "LINEAR16",
+  "audio/wave": "LINEAR16",
+  "audio/mp3": "MP3",
+  "audio/mpeg": "MP3",
+  "audio/ogg": "OGG_OPUS",
+  "audio/flac": "FLAC",
+  "audio/m4a": "AAC",
+  "audio/aac": "AAC",
+} as const;
+
+// Helper function to get encoding from file extension
+export const getEncodingFromExtension = (
+  filename: string,
+): FanoSTTConfig["encoding"] => {
+  const extension = filename.toLowerCase().substring(filename.lastIndexOf("."));
+  return (
+    AUDIO_EXTENSION_TO_ENCODING[
+      extension as keyof typeof AUDIO_EXTENSION_TO_ENCODING
+    ] || "LINEAR16"
+  );
+};
+
+// Helper function to get encoding from MIME type
+export const getEncodingFromMimeType = (
+  mimeType: string,
+): FanoSTTConfig["encoding"] => {
+  return (
+    AUDIO_MIME_TO_ENCODING[mimeType as keyof typeof AUDIO_MIME_TO_ENCODING] ||
+    "LINEAR16"
+  );
+};
+
+// Helper function to create STT config based on file
+export const createSTTConfigForFile = (
+  file: File,
+  overrides?: Partial<FanoSTTConfig>,
+): FanoSTTConfig => {
+  // Get encoding from file type (prefer MIME type, fallback to extension)
+  let encoding: FanoSTTConfig["encoding"];
+
+  if (file.type) {
+    encoding = getEncodingFromMimeType(file.type);
+  } else {
+    encoding = getEncodingFromExtension(file.name);
+  }
+
+  // Adjust sample rate based on encoding
+  let sampleRateHertz = DEFAULT_STT_CONFIG.sampleRateHertz;
+
+  // Some formats may benefit from different sample rates
+  switch (encoding) {
+    case "MP3":
+    case "AAC":
+      // MP3 and AAC often use higher sample rates
+      sampleRateHertz = 44100;
+      break;
+    case "FLAC":
+      // FLAC can support very high sample rates
+      sampleRateHertz = 48000;
+      break;
+    case "LINEAR16":
+    case "OGG_OPUS":
+    default:
+      // Keep default 16000 Hz for most formats
+      sampleRateHertz = 16000;
+      break;
+  }
+
+  return {
+    ...DEFAULT_STT_CONFIG,
+    encoding,
+    sampleRateHertz,
+    ...overrides,
+  };
+};
 
 export const DEFAULT_STT_CONFIG: FanoSTTConfig = {
   languageCode: "en-SG-x-multi",
