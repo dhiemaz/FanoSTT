@@ -9,8 +9,23 @@ const AUTH_TOKEN =
   process.env.AUTH_TOKEN ||
   "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJmYW5vX2RlbmllZF9hY2Nlc3MiOlsiY2FsbGludGVyOndvcmtzcGFjZS0qIiwiY2FsbGludGVyOnZvaWNlcHJpbnQtKiIsImNhbGxpbnRlcjp3b3JkLWNsb3VkLSoiLCJjYWxsaW50ZXI6cHJvLXNlYXJjaC1hbmQtc2F2ZS1xdWVyeSIsImNhbGxpbnRlcjp3b3Jrc3BhY2Utbm90aWZpY2F0aW9uLXRhcmdldCIsImNhbGxpbnRlcjpub3RpZmljYXRpb24tdGFyZ2V0IiwiSW50ZW50OioiLCJQb3J0YWw6c3VwZXItdXNlciJdLCJmYW5vX3NwZWVjaF9kaWFyaXplX3F1b3RhX3N0cmF0ZWd5IjoiZGVmYXVsdCIsImZhbm9fc3BlZWNoX2dlbmVyYXRlX3ZvaWNlcHJpbnRfcXVvdGFfc3RyYXRlZ3kiOiJkZWZhdWx0IiwiZmFub19zcGVlY2hfcmVjb2duaXplX3F1b3RhX3N0cmF0ZWd5IjoiZGVmYXVsdCIsImZhbm9fc3BlZWNoX3N0cmVhbWluZ19kZXRlY3RfYWN0aXZpdHlfcXVvdGFfc3RyYXRlZ3kiOiJkZWZhdWx0IiwiZmFub19zcGVlY2hfc3RyZWFtaW5nX3JlY29nbml6ZV9xdW90YV9zdHJhdGVneSI6ImRlZmF1bHQiLCJmYW5vX3NwZWVjaF9yZXBsYWNlX3BocmFzZXNfcXVvdGFfc3RyYXRlZ3kiOiJkZWZhdWx0IiwiZmFub19zcGVlY2hfc3ludGhlc2l6ZV9zcGVlY2hfcXVvdGFfc3RyYXRlZ3kiOiJkZWZhdWx0IiwiaWF0IjoxNzYyNzM4ODg3LCJleHAiOjE3NjUzODI0MDAsImF1ZCI6InRlbXAtb2NiYy1ydHN0dC1wb2MiLCJzdWIiOiJPQ0JDIiwiaXNzIjoiaHR0cHM6Ly9hdXRoLmZhbm8uYWkifQ.Gj3qIyhD2aZvNADKSlOPKnI4w8dMgEDcgiybx8vGn5xTSdYeBw_d9AiyoCjOQb0m-FAJRRL73ykXYLV_Q5EjzvCt4Kmigdb40N5aFCssQ2rq0yUry2rxhT84eBNptfwOy6SJPoZOTkrTm026W8DkFOzNO_NxFWJLmjMZiRfJAGhOBmfEZlDJxmfTaVNKWC-qD2b-p09JoXsRU7hOcvHrmST7igbEwiHunA9ig1T9dfFoxPulMCsIDl7VsCK_AbbjWWpAJ2mkqjyDyzMLlTxBKbVIKX_s8V9dG9VgiHzCGTBiV4uuoiAsoupJ7GOdov6xmvdG2UMVuUv1yh3D78JTSA";
 
-// Create HTTP server
-const server = http.createServer();
+// Create HTTP server with health check endpoint
+const server = http.createServer((req, res) => {
+  if (req.url === "/health" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        status: "ok",
+        timestamp: new Date().toISOString(),
+        service: "fano-stt-proxy",
+        version: "1.0.0",
+      }),
+    );
+  } else {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Not Found");
+  }
+});
 
 // Create WebSocket server
 const wss = new WebSocket.Server({ server });
