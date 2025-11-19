@@ -1,0 +1,146 @@
+version: "3.8"
+
+services:
+  # Main FANO STT Application
+  fano-stt-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fano-stt-app
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    expose:
+      - "3001"
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - fano-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3001/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # FANO STT Proxy Service
+  fano-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    container_name: fano-proxy
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - AUTH_TOKEN=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJmYW5vX2RldiI6dHJ1ZSwiZXhwIjoxNzY3MzAwNzk5fQ.d7zBL2bH-qJ6uK5yGHKZPhhRQX0dWRxCYCw2aVq-8wgZY-dvYZ8dTL3vHqQvlDEfgJWr5kK6uT5hP4kQJvF0ePEv7jKvPKJAhOG4h8LH6bNGvnD3wE1YkV7x0iEgFKq6uQ6KYPXsAkGhHgJP-KjVa_a8YvQNWfj4YGvAQoA5v5h
+    expose:
+      - "8080"
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - fano-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const http = require('http'); http.get('http://localhost:8080', (res) => { process.exit(res.statusCode === 404 ? 0 : 1); }).on('error', () => process.exit(1));",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Nginx SSL Reverse Proxy
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: fano-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl:/etc/letsencrypt:ro
+      - ./certbot-data:/var/www/certbot:ro
+      - ./nginx-logs:/var/log/nginx
+    depends_on:
+      - fano-stt-app
+      - fano-proxy
+    restart: unless-stopped
+    networks:
+      - fano-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:80/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Certbot for SSL certificate management
+  # Note: Let's Encrypt doesn't support IP addresses directly
+  # For IP-based SSL, you have several options:
+  # 1. Use a domain name with nip.io (e.g., 143.198.192.233.nip.io)
+  # 2. Use self-signed certificates
+  # 3. Get a proper domain name
+  certbot:
+    image: certbot/certbot:latest
+    container_name: fano-certbot
+    volumes:
+      - ./ssl:/etc/letsencrypt
+      - ./certbot-data:/var/www/certbot
+    # Option 1: Use nip.io for IP-based domain
+    command: certonly --webroot --webroot-path=/var/www/certbot --email admin@example.com --agree-tos --no-eff-email -d 143.198.192.233.nip.io
+    # Option 2: Use actual domain (replace with your domain)
+    # command: certonly --webroot --webroot-path=/var/www/certbot --email admin@yourdomain.com --agree-tos --no-eff-email -d yourdomain.com
+    depends_on:
+      - nginx
+    networks:
+      - fano-network
+    profiles:
+      - ssl-setup
+
+  # SSL Certificate Renewal (runs daily)
+  certbot-renew:
+    image: certbot/certbot:latest
+    container_name: fano-certbot-renew
+    volumes:
+      - ./ssl:/etc/letsencrypt
+      - ./certbot-data:/var/www/certbot
+    command: renew --webroot --webroot-path=/var/www/certbot --quiet
+    depends_on:
+      - nginx
+    networks:
+      - fano-network
+    profiles:
+      - ssl-renew
+
+networks:
+  fano-network:
+    driver: bridge
+
+volumes:
+  ssl-certs:
+    driver: local
+  nginx-logs:
+    driver: local
+  certbot-data:
+    driver: local
