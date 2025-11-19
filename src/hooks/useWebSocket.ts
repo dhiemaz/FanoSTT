@@ -78,7 +78,7 @@ export function useWebSocket({
   }, []);
 
   const handleOpen = useCallback(() => {
-    console.log("✅ [FANO] Connected via proxy with Authorization header");
+    console.log("[FANO] Connected via proxy with Authorization header");
 
     // Reset reconnection attempts on successful connection
     reconnectAttemptsRef.current = 0;
@@ -97,7 +97,7 @@ export function useWebSocket({
     (event: MessageEvent) => {
       try {
         const message: FanoSTTResponse = JSON.parse(event.data);
-        console.log("📨 [FANO] Received:", message);
+        console.log("[FANO] Received:", message);
 
         setLastMessage(message);
         onMessage?.(message);
@@ -111,7 +111,7 @@ export function useWebSocket({
 
   const handleError = useCallback(
     (event: Event) => {
-      console.error("❌ [FANO] Connection error:", event);
+      console.error("[FANO] Connection error:", event);
       updateConnectionStatus({
         state: "error",
         error: "WebSocket connection error",
@@ -137,8 +137,7 @@ export function useWebSocket({
     });
 
     try {
-      console.log("🔌 [FANO] Connecting via proxy server");
-      console.log("🔌 [FANO] URL:", url);
+      console.log("[FANO] Connecting via proxy server with URL : ", url);
 
       wsRef.current = new WebSocket(url);
 
@@ -147,7 +146,7 @@ export function useWebSocket({
       wsRef.current.onerror = handleError;
 
       wsRef.current.onclose = (event: CloseEvent) => {
-        console.log("🔌 [FANO] Connection closed:", event.code, event.reason);
+        console.log("[FANO] Connection closed:", event.code, event.reason);
         clearTimeouts();
 
         const updates: Partial<ConnectionStatus> = {
@@ -162,10 +161,10 @@ export function useWebSocket({
 
         // Attempt to reconnect unless manually closed
         if (!isManuallyClosedRef.current && scheduleReconnectRef.current) {
-          console.log("🔄 [FANO] Connection lost - initiating reconnection");
+          console.log("[FANO] Connection lost - initiating reconnection");
           scheduleReconnectRef.current();
         } else {
-          console.log("🔌 [FANO] Manual disconnect - no reconnection");
+          console.log("[FANO] disconnect ");
         }
       };
     } catch (error) {
@@ -215,7 +214,7 @@ export function useWebSocket({
     reconnectAttemptsRef.current = currentAttempts + 1;
 
     console.log(
-      `🔄 [FANO] Reconnecting in ${delay}ms (attempt ${currentAttempts + 1}/${maxAttempts})`,
+      `[FANO] Reconnecting in ${delay}ms (attempt ${currentAttempts + 1}/${maxAttempts})`,
     );
 
     updateConnectionStatus({
@@ -236,7 +235,7 @@ export function useWebSocket({
       wsRef.current?.readyState === WebSocket.OPEN ||
       wsRef.current?.readyState === WebSocket.CONNECTING
     ) {
-      console.log("🔌 [FANO] Already connected or connecting");
+      //console.log("[FANO] Already connected or connecting");
       return;
     }
 
@@ -267,7 +266,7 @@ export function useWebSocket({
 
   const sendMessage = useCallback(
     (message: FanoSTTRequest) => {
-      console.log("📤 [FANO] Sending message:", message);
+      console.log("[FANO] Sending message:", message);
 
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         try {

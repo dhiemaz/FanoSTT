@@ -65,12 +65,12 @@ function NavigationHeader() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center space-x-4">
+            {/*<div className="flex items-center space-x-4">
               <div className="hidden sm:flex items-center space-x-2 px-3 py-1.5 bg-white/5 rounded-full border border-white/10">
                 <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
                 <span className="text-sm text-white/80 font-medium">Ready</span>
               </div>
-            </div>
+            </div>*/}
           </div>
         </div>
       </nav>
@@ -100,14 +100,12 @@ function FooterSection() {
           <div className="flex flex-col md:flex-row items-center justify-between space-y-4 md:space-y-0">
             <div className="flex items-center space-x-6">
               <p className="text-sm text-white/60">
-                © 2024 Fano STT. Powered by Fano AI.
+                © 2025 Fano STT. Powered by Tetherfi Pte Ltd.
               </p>
               <div className="hidden md:flex items-center space-x-4 text-xs text-white/40">
                 <span>Real-time transcription</span>
                 <span>•</span>
                 <span>Multi-language support</span>
-                <span>•</span>
-                <span>Enterprise ready</span>
               </div>
             </div>
             <div className="flex items-center space-x-4">

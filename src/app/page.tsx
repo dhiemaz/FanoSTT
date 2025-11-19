@@ -13,7 +13,6 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   ExclamationTriangleIcon,
-  Cog6ToothIcon,
   SpeakerWaveIcon,
 } from "@heroicons/react/24/outline";
 import {
@@ -56,13 +55,15 @@ export default function HomePage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [showSettings, setShowSettings] = useState(false);
+
   const [isDragOver, setIsDragOver] = useState(false);
   const [finalTranscript, setFinalTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
   const [useQueryAuth, setUseQueryAuth] = useState(false);
   const [lastRequest, setLastRequest] = useState<FanoSTTRequest | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [hasActiveRequest, setHasActiveRequest] = useState(false);
+  const [isSendingFile, setIsSendingFile] = useState(false);
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -96,6 +97,8 @@ export default function HomePage() {
       console.log(`[FANO] Final aggregated transcript: "${finalTranscript}"`);
       console.log(`[FANO] Total transcript segments: ${transcripts.length}`);
       setIsProcessing(false);
+      setHasActiveRequest(false); // Clear active request on completion
+      setIsSendingFile(false); // Clear file sending state on completion
       showToast(
         "success",
         "Transcription Complete",
@@ -137,7 +140,7 @@ export default function HomePage() {
             // Log aggregated transcript progress for file uploads
             if (isProcessing) {
               console.log(
-                `📊 [FANO] Aggregated ${transcripts.length + 1} segments. Current: "${finalTranscript}"`,
+                `[FANO] Aggregated ${transcripts.length + 1} segments. Current: "${finalTranscript}"`,
               );
             }
           } else {
@@ -173,6 +176,8 @@ export default function HomePage() {
 
       showToast("error", "Transcription Error", message.data.error.message);
       setIsProcessing(false);
+      setHasActiveRequest(false); // Clear active request on error
+      setIsSendingFile(false); // Clear file sending state on error
     }
   }
 
@@ -190,7 +195,21 @@ export default function HomePage() {
       },
       onDisconnect: () => {
         console.log("[FANO] Disconnected");
-        showToast("warning", "Disconnected", "FANO STT connection lost");
+
+        // If we had an active file sending request when disconnected, mark for retry
+        if (isSendingFile && hasActiveRequest && lastRequest && !isRetrying) {
+          console.log(
+            "[FANO] Connection lost during file upload - will retry after reconnection",
+          );
+          setIsRetrying(true);
+          showToast(
+            "warning",
+            "Upload Interrupted",
+            "Reconnecting and retrying file upload...",
+          );
+        } else {
+          showToast("warning", "Disconnected", "Reconnecting...");
+        }
       },
     });
 
@@ -208,18 +227,19 @@ export default function HomePage() {
     }, 1000);
   }, [disconnect, connect]);
 
-  // Effect to handle DEADLINE_EXCEEDED retry logic
+  // Effect to handle DEADLINE_EXCEEDED retry logic (only for file uploads)
   useEffect(() => {
     if (
       lastMessage?.data?.error?.code === 4 &&
-      lastMessage?.data?.error?.message?.includes("DEADLINE_EXCEEDED")
+      lastMessage?.data?.error?.message?.includes("DEADLINE_EXCEEDED") &&
+      isSendingFile
     ) {
       if (!isRetrying) {
         setIsRetrying(true);
         handleDeadlineExceeded();
       }
     }
-  }, [lastMessage, isRetrying, handleDeadlineExceeded]);
+  }, [lastMessage, isRetrying, handleDeadlineExceeded, isSendingFile]);
 
   // Effect to handle request retry after reconnection
   useEffect(() => {
@@ -233,19 +253,7 @@ export default function HomePage() {
     }
   }, [connectionStatus.state, isRetrying, lastRequest, sendMessage]);
 
-  // Connection test function
-  const testConnection = useCallback(() => {
-    console.log("[FANO] Testing connection...");
-
-    if (connectionStatus.state === "connected") {
-      disconnect();
-      setTimeout(() => connect(), 1000);
-    } else {
-      connect();
-    }
-
-    showToast("info", "Testing Connection", "Testing FANO STT connection...");
-  }, [connectionStatus.state, connect, disconnect, showToast]);
+  // Manual connection control - no auto-connect
 
   // Audio chunk handler for real-time recording
   const handleAudioChunk = useCallback(
@@ -355,6 +363,7 @@ export default function HomePage() {
     setTranscripts([]);
     setFinalTranscript("");
     setUploadProgress(0);
+    setIsSendingFile(true); // Mark as sending file
 
     try {
       // Send initial configuration with specific Fano STT format
@@ -382,6 +391,7 @@ export default function HomePage() {
         "[FANO AUTH] Using authenticated connection for file processing",
       );
       setLastRequest(configMessage);
+      setHasActiveRequest(true);
       sendMessage(configMessage);
 
       // Convert raw file to base64 (don't decode/re-encode for file uploads)
@@ -415,6 +425,7 @@ export default function HomePage() {
         "[FANO] Starting transcript aggregation - waiting for response segments...",
       );
       setLastRequest(audioMessage);
+      setHasActiveRequest(true);
       sendMessage(audioMessage);
       setUploadProgress(100);
 
@@ -438,12 +449,14 @@ export default function HomePage() {
         "[FANO AUTH] File upload complete - now aggregating transcript responses...",
       );
       setLastRequest(eofMessage);
+      setHasActiveRequest(true);
       sendMessage(eofMessage);
       // Don't show completion toast here - wait for EOF response
     } catch (error) {
       console.error("File processing error:", error);
       showToast("error", "Processing Error", "Failed to process audio file");
       setIsProcessing(false);
+      setIsSendingFile(false); // Clear file sending state on error
     } finally {
       setUploadProgress(0);
     }
@@ -527,7 +540,7 @@ export default function HomePage() {
       data: "EOF",
     };
 
-    console.log("[FANO AUTH] Sending EOF for recording:", eofMessage);
+    console.log("[FANO AUTH] Sending EOF :", eofMessage);
     setLastRequest(eofMessage);
     sendMessage(eofMessage);
     showToast("success", "Recording Stopped", "Transcription completed");
@@ -668,11 +681,10 @@ export default function HomePage() {
             transition={{ duration: 0.8 }}
           >
             <h1 className="text-4xl md:text-6xl font-bold gradient-text mb-6">
-              Advanced Speech-to-Text
+              Speech-to-Text with Fano STT
             </h1>
             <p className="text-xl text-white/70 max-w-2xl mx-auto leading-relaxed">
-              Professional transcription powered by Fano AI with real-time
-              streaming and enterprise-grade accuracy
+              Transcription powered by Fano STT
             </p>
           </motion.div>
         </div>
@@ -684,31 +696,56 @@ export default function HomePage() {
           transition={{ delay: 0.2, duration: 0.6 }}
           className="flex items-center justify-between mb-8 p-4 glass rounded-2xl"
         >
-          <div className="flex items-center space-x-6">
-            {renderConnectionStatus()}
-            <button
-              onClick={testConnection}
-              className="px-3 py-1.5 text-xs font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-full hover:bg-blue-500/20 transition-colors"
-              title="Test FANO STT connection and auth token"
-            >
-              🧪 Test Auth
-            </button>
-            {isRecording && (
-              <div className="flex items-center space-x-2 text-red-400">
-                <div className="w-3 h-3 bg-red-400 rounded-full animate-pulse"></div>
-                <span className="text-sm font-medium">
-                  Recording • {formatDuration(recordingTime)}
-                </span>
-              </div>
-            )}
-          </div>
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center space-x-6">
+              {renderConnectionStatus()}
+              {isRecording && (
+                <div className="flex items-center space-x-2 text-red-400">
+                  <div className="w-3 h-3 bg-red-400 rounded-full animate-pulse"></div>
+                  <span className="text-sm font-medium">
+                    Recording • {formatDuration(recordingTime)}
+                  </span>
+                </div>
+              )}
+            </div>
 
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-          >
-            <Cog6ToothIcon className="w-5 h-5 text-white/60" />
-          </button>
+            <div className="flex items-center space-x-3">
+              {connectionStatus.state === "disconnected" ||
+              connectionStatus.state === "error" ? (
+                <button
+                  onClick={connect}
+                  className="px-3 py-1.5 text-xs font-medium text-green-400 bg-green-500/10 border border-green-500/20 rounded-full hover:bg-green-500/20 transition-colors"
+                  title="Connect to FANO STT"
+                >
+                  🔗 Connect
+                </button>
+              ) : connectionStatus.state === "connecting" ? (
+                <button
+                  disabled
+                  className="px-3 py-1.5 text-xs font-medium text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 rounded-full opacity-50"
+                  title="Connecting to FANO STT..."
+                >
+                  🔄 Connecting...
+                </button>
+              ) : connectionStatus.state === "reconnecting" ? (
+                <button
+                  disabled
+                  className="px-3 py-1.5 text-xs font-medium text-orange-400 bg-orange-500/10 border border-orange-500/20 rounded-full opacity-50"
+                  title="Reconnecting to FANO STT..."
+                >
+                  🔄 Reconnecting...
+                </button>
+              ) : (
+                <button
+                  onClick={disconnect}
+                  className="px-3 py-1.5 text-xs font-medium text-red-400 bg-red-500/10 border border-red-500/20 rounded-full hover:bg-red-500/20 transition-colors"
+                  title="Disconnect from FANO STT"
+                >
+                  🔌 Disconnect
+                </button>
+              )}
+            </div>
+          </div>
         </motion.div>
 
         {/* Main Content */}

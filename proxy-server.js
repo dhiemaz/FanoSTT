@@ -15,12 +15,12 @@ const server = http.createServer();
 // Create WebSocket server
 const wss = new WebSocket.Server({ server });
 
-console.log(`🚀 FANO STT Proxy Server starting on port ${PROXY_PORT}`);
-console.log(`📡 Proxying to: ${FANO_URL}`);
-console.log(`🔐 Using Authorization: Bearer ${AUTH_TOKEN.substring(0, 50)}...`);
+console.log(`FANO STT Proxy Server starting on port ${PROXY_PORT}`);
+console.log(`Proxying to: ${FANO_URL}`);
+console.log(`Using Authorization: Bearer ${AUTH_TOKEN.substring(0, 50)}...`);
 
 wss.on("connection", (clientWs, request) => {
-  console.log("📱 Client connected from:", request.socket.remoteAddress);
+  console.log("Client connected from:", request.socket.remoteAddress);
 
   let fanoWs = null;
 
@@ -34,16 +34,16 @@ wss.on("connection", (clientWs, request) => {
       },
     });
 
-    console.log("🔌 Connecting to FANO STT with Authorization header...");
+    console.log("Connecting to FANO STT with Authorization header...");
 
     fanoWs.on("open", () => {
-      console.log("✅ Connected to FANO STT with Authorization header");
+      console.log("Connected to FANO STT with Authorization header");
     });
 
     fanoWs.on("message", (data) => {
       try {
         const message = JSON.parse(data.toString());
-        console.log("📨 [FANO → CLIENT]:", {
+        console.log("[FANO → CLIENT]:", {
           event: message.event,
           hasResults: !!message.data?.results,
           hasError: !!message.data?.error,
@@ -77,7 +77,7 @@ wss.on("connection", (clientWs, request) => {
     });
 
     fanoWs.on("close", (code, reason) => {
-      console.log(`🔌 FANO STT connection closed: ${code} ${reason}`);
+      console.log(`FANO STT connection closed: ${code} ${reason}`);
       if (clientWs.readyState === WebSocket.OPEN) {
         clientWs.close(code, reason || "FANO connection closed");
       }
@@ -120,7 +120,7 @@ wss.on("connection", (clientWs, request) => {
       if (fanoWs && fanoWs.readyState === WebSocket.OPEN) {
         fanoWs.send(data.toString());
       } else {
-        console.warn("⚠️ FANO connection not ready, dropping message");
+        console.warn("FANO connection not ready, dropping message");
       }
     } catch (error) {
       console.error("❌ Error processing client message:", error);
@@ -128,7 +128,7 @@ wss.on("connection", (clientWs, request) => {
   });
 
   clientWs.on("close", (code, reason) => {
-    console.log(`📱 Client disconnected: ${code} ${reason}`);
+    console.log(`Client disconnected: ${code} ${reason}`);
     if (fanoWs && fanoWs.readyState === WebSocket.OPEN) {
       fanoWs.close(1000, "Client disconnected");
     }
@@ -144,14 +144,12 @@ wss.on("connection", (clientWs, request) => {
 
 // Start server
 server.listen(PROXY_PORT, () => {
+  console.log(`FANO STT Proxy Server running on ws://localhost:${PROXY_PORT}`);
   console.log(
-    `✅ FANO STT Proxy Server running on ws://localhost:${PROXY_PORT}`,
-  );
-  console.log(
-    `📋 Update your frontend to connect to: ws://localhost:${PROXY_PORT}`,
+    `Update your frontend to connect to: ws://localhost:${PROXY_PORT}`,
   );
   console.log("");
-  console.log("🔧 Usage:");
+  console.log("Usage:");
   console.log("1. Run: node proxy-server.js");
   console.log("2. Update WEBSOCKET_URL to: ws://localhost:8080");
   console.log(
@@ -162,17 +160,17 @@ server.listen(PROXY_PORT, () => {
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
-  console.log("📴 Shutting down proxy server...");
+  console.log("Shutting down proxy server...");
   server.close(() => {
-    console.log("✅ Proxy server stopped");
+    console.log("Proxy server stopped");
     process.exit(0);
   });
 });
 
 process.on("SIGINT", () => {
-  console.log("📴 Shutting down proxy server...");
+  console.log("Shutting down proxy server...");
   server.close(() => {
-    console.log("✅ Proxy server stopped");
+    console.log("Proxy server stopped");
     process.exit(0);
   });
 });
