@@ -30,21 +30,6 @@ export function useWebSocket({
   onConnect,
   onDisconnect,
 }: UseWebSocketOptions = {}): UseWebSocketReturn {
-  // Debug logging for WebSocket URL
-  console.log("[DEBUG] WebSocket URL configuration:");
-  console.log("  WEBSOCKET_URL constant:", WEBSOCKET_URL);
-  console.log(
-    "  NEXT_PUBLIC_WEBSOCKET_URL env:",
-    process.env.NEXT_PUBLIC_WEBSOCKET_URL,
-  );
-  console.log("  All environment variables:", {
-    NODE_ENV: process.env.NODE_ENV,
-    NEXT_PUBLIC_WEBSOCKET_URL: process.env.NEXT_PUBLIC_WEBSOCKET_URL,
-    WEBSOCKET_URL: process.env.WEBSOCKET_URL,
-  });
-  console.log("  Final URL being used:", url);
-  console.log("  typeof process:", typeof process);
-  console.log("  Browser check:", typeof window !== "undefined");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
     state: "disconnected",
     reconnectAttempts: 0,
@@ -153,9 +138,6 @@ export function useWebSocket({
 
     try {
       console.log("[FANO] Connecting via proxy server with URL : ", url);
-      console.log("[DEBUG] About to create WebSocket with exact URL:", url);
-      console.log("[DEBUG] URL type:", typeof url);
-      console.log("[DEBUG] URL length:", url?.length);
 
       wsRef.current = new WebSocket(url);
 

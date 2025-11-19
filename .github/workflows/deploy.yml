@@ -26,19 +26,7 @@ jobs:
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
           DO_USER: ${{ secrets.DO_USER }}
-          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
         run: |
-          # Create environment file first
-          ssh $DO_USER@$DO_HOST "echo 'AUTH_TOKEN=$AUTH_TOKEN' > /opt/fano-stt/.env"
-          ssh $DO_USER@$DO_HOST "echo 'WEBSOCKET_URL=ws://10.104.0.2:8080' >> /opt/fano-stt/.env"
-          ssh $DO_USER@$DO_HOST "echo 'NEXT_PUBLIC_WEBSOCKET_URL=ws://143.198.192.233:8080' >> /opt/fano-stt/.env"
-          ssh $DO_USER@$DO_HOST "echo 'WEB_PORT=3001' >> /opt/fano-stt/.env"
-          ssh $DO_USER@$DO_HOST "echo 'PROXY_PORT=8080' >> /opt/fano-stt/.env"
-          ssh $DO_USER@$DO_HOST "echo 'NODE_ENV=production' >> /opt/fano-stt/.env"
-          ssh $DO_USER@$DO_HOST "echo 'NEXT_TELEMETRY_DISABLED=1' >> /opt/fano-stt/.env"
-          ssh $DO_USER@$DO_HOST "echo 'PORT=3001' >> /opt/fano-stt/.env"
-          ssh $DO_USER@$DO_HOST "echo 'HOSTNAME=0.0.0.0' >> /opt/fano-stt/.env"
-
           # Deploy application
           ssh $DO_USER@$DO_HOST << 'EOF'
             # Navigate to app directory
@@ -53,9 +41,8 @@ jobs:
             # Remove old images to free space
             docker system prune -f
 
-            # Build and start services with build args
-            NEXT_PUBLIC_WEBSOCKET_URL=ws://143.198.192.233:8080 docker-compose -f docker-compose.yml build --no-cache
-            docker-compose -f docker-compose.yml up -d
+            # Build and start services
+            docker-compose -f docker-compose.yml up --build -d
 
             # Show status
             docker-compose -f docker-compose.yml ps
