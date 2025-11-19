@@ -64,11 +64,16 @@ export default function HomePage() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [hasActiveRequest, setHasActiveRequest] = useState(false);
   const [isSendingFile, setIsSendingFile] = useState(false);
+  const [isSendingCompleteAudio, setIsSendingCompleteAudio] = useState(false);
+
+  // Manual audio level for testing
+  const [manualAudioLevel, setManualAudioLevel] = useState<number | null>(null);
 
   // Microphone permission state
   const [micPermission, setMicPermission] = useState<
     "granted" | "denied" | "prompt" | "checking"
   >("checking");
+  const [showMicModal, setShowMicModal] = useState(false);
   const [audioQuality, setAudioQuality] = useState<
     "excellent" | "good" | "fair" | "poor"
   >("good");
@@ -406,7 +411,110 @@ export default function HomePage() {
     };
 
     checkMicPermission();
-  }, []);
+
+    // Periodic permission check every 5 seconds
+    const permissionCheckInterval = setInterval(async () => {
+      try {
+        if (!navigator.permissions) return;
+
+        const permission = await navigator.permissions.query({
+          name: "microphone" as PermissionName,
+        });
+
+        const currentState = permission.state as
+          | "granted"
+          | "denied"
+          | "prompt";
+        if (currentState !== micPermission && micPermission !== "checking") {
+          setMicPermission(currentState);
+
+          // Show toast for permission changes
+          if (currentState === "granted") {
+            showToast(
+              "success",
+              "Microphone Enabled",
+              "🎙️ Microphone access granted",
+            );
+          } else if (currentState === "denied" && micPermission === "granted") {
+            showToast(
+              "warning",
+              "Microphone Disabled",
+              "🚫 Microphone access has been revoked",
+            );
+          }
+        }
+      } catch (error) {
+        // Silently handle errors in periodic check
+        console.log("Periodic permission check failed:", error);
+      }
+    }, 5000);
+
+    return () => {
+      clearInterval(permissionCheckInterval);
+    };
+  }, [micPermission, showToast]);
+
+  // Function to explicitly request microphone permission
+  const requestMicrophonePermission = useCallback(async () => {
+    try {
+      setMicPermission("checking");
+      showToast(
+        "info",
+        "Requesting Permission",
+        "Please allow microphone access when prompted",
+      );
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setMicPermission("denied");
+        showToast(
+          "error",
+          "Not Supported",
+          "Microphone access is not supported in this browser",
+        );
+        return;
+      }
+
+      // Request permission by trying to get user media
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+
+      // Stop the stream immediately as we only needed permission
+      stream.getTracks().forEach((track) => track.stop());
+
+      setMicPermission("granted");
+      showToast(
+        "success",
+        "Permission Granted",
+        "Microphone access has been enabled",
+      );
+    } catch (error) {
+      console.error("Permission request failed:", error);
+      setMicPermission("denied");
+
+      if (error instanceof Error) {
+        if (error.name === "NotAllowedError") {
+          showToast(
+            "error",
+            "Permission Denied",
+            "Please click the microphone icon in your browser's address bar to enable access",
+          );
+        } else if (error.name === "NotFoundError") {
+          showToast(
+            "error",
+            "No Microphone",
+            "No microphone was found on your device",
+          );
+        } else {
+          showToast(
+            "error",
+            "Permission Error",
+            "Failed to request microphone permission",
+          );
+        }
+      }
+    }
+  }, [showToast]);
 
   // Audio recorder hook - placeholder for handleAudioChunk to avoid circular dependency
   const handleAudioChunkRef = useRef<((chunk: any) => void) | null>(null);
@@ -416,6 +524,77 @@ export default function HomePage() {
       handleAudioChunkRef.current(chunk);
     }
   }, []);
+
+  // Handle complete recording when recording stops
+  const handleRecordingComplete = useCallback(
+    async (completeAudio: Int16Array, duration: number) => {
+      try {
+        setIsSendingCompleteAudio(true);
+        console.log(
+          `[FANO COMPLETE] Processing complete recording: ${completeAudio.length} samples, ${duration}ms`,
+        );
+
+        if (connectionStatus.state === "connected") {
+          // Convert complete audio to base64
+          const bytes = new Uint8Array(completeAudio.buffer);
+          let binary = "";
+          const chunkSize = 0x8000; // 32KB chunks to avoid call stack overflow
+
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(
+              i,
+              Math.min(i + chunkSize, bytes.length),
+            );
+            binary += String.fromCharCode.apply(null, Array.from(chunk));
+          }
+
+          const base64Audio = btoa(binary);
+
+          // Send complete audio as a single message
+          const completeAudioMessage: FanoSTTRequest = {
+            event: "request",
+            data: {
+              audioContent: base64Audio,
+            },
+          };
+
+          console.log(
+            `[FANO COMPLETE] Sending complete audio recording (${base64Audio.length} chars base64)`,
+          );
+          setLastRequest(completeAudioMessage);
+          sendMessage(completeAudioMessage);
+
+          showToast(
+            "success",
+            "Complete Recording Sent",
+            `🎙️ Sent ${Math.round(duration / 1000)}s recording to FANO STT`,
+          );
+        } else {
+          console.warn(
+            "[FANO COMPLETE] Not connected, cannot send complete recording",
+          );
+          showToast(
+            "warning",
+            "Connection Lost",
+            "Complete recording couldn't be sent - connection lost",
+          );
+        }
+      } catch (error) {
+        console.error(
+          "[FANO COMPLETE] Failed to process complete recording:",
+          error,
+        );
+        showToast(
+          "error",
+          "Processing Error",
+          "Failed to process complete recording",
+        );
+      } finally {
+        setIsSendingCompleteAudio(false);
+      }
+    },
+    [connectionStatus.state, sendMessage, showToast],
+  );
 
   const {
     isRecording,
@@ -430,6 +609,7 @@ export default function HomePage() {
     error: recordingError,
   } = useAudioRecorder({
     onAudioChunk: handleAudioChunkPlaceholder,
+    onRecordingComplete: handleRecordingComplete,
     onError: (error) => {
       showToast("error", "Recording Error", error.message);
       if (
@@ -537,14 +717,82 @@ export default function HomePage() {
   }, [handleAudioChunk]);
 
   // Update audio quality based on level
+  // Audio quality based on level
   useEffect(() => {
-    if (isRecording && audioLevel > 0) {
-      if (audioLevel > 0.7) setAudioQuality("excellent");
-      else if (audioLevel > 0.4) setAudioQuality("good");
-      else if (audioLevel > 0.1) setAudioQuality("fair");
+    const effectiveLevel =
+      manualAudioLevel !== null ? manualAudioLevel : audioLevel;
+    if (isRecording && effectiveLevel > 0) {
+      if (effectiveLevel > 0.7) setAudioQuality("excellent");
+      else if (effectiveLevel > 0.4) setAudioQuality("good");
+      else if (effectiveLevel > 0.1) setAudioQuality("fair");
       else setAudioQuality("poor");
     }
-  }, [isRecording, audioLevel]);
+  }, [isRecording, audioLevel, manualAudioLevel]);
+
+  // Debug function to test audio visualization
+  const testAudioVisualization = useCallback(() => {
+    const effectiveLevel =
+      manualAudioLevel !== null ? manualAudioLevel : audioLevel;
+    console.log("[AUDIO VIZ DEBUG] Testing visualization:", {
+      isRecording,
+      audioLevel,
+      manualAudioLevel,
+      effectiveLevel,
+      audioData: audioData ? "present" : "missing",
+      recordingError,
+    });
+
+    showToast(
+      "info",
+      "Audio Debug",
+      `Level: ${Math.round((effectiveLevel || 0) * 100)}% | Recording: ${isRecording ? "Yes" : "No"} | Manual: ${manualAudioLevel !== null ? "Yes" : "No"}`,
+    );
+  }, [
+    isRecording,
+    audioLevel,
+    manualAudioLevel,
+    audioData,
+    recordingError,
+    showToast,
+  ]);
+
+  // Manual audio level test for debugging
+  const testManualAudioLevel = useCallback(() => {
+    let testLevel = 0;
+    let direction = 1;
+
+    const interval = setInterval(() => {
+      testLevel += direction * 0.1;
+      if (testLevel >= 1) {
+        testLevel = 1;
+        direction = -1;
+      } else if (testLevel <= 0) {
+        testLevel = 0;
+        direction = 1;
+      }
+
+      // Manually set audio level for testing
+      setManualAudioLevel(testLevel);
+
+      console.log(
+        "[MANUAL TEST] Setting audio level to:",
+        testLevel.toFixed(2),
+      );
+    }, 100);
+
+    // Stop test after 3 seconds
+    setTimeout(() => {
+      clearInterval(interval);
+      setManualAudioLevel(null);
+      console.log("[MANUAL TEST] Test completed, reset to null");
+    }, 3000);
+
+    showToast(
+      "info",
+      "Manual Test",
+      "Testing audio level animation for 3 seconds",
+    );
+  }, [showToast]);
 
   // File upload handlers
   const handleFileSelect = useCallback(
@@ -809,27 +1057,74 @@ export default function HomePage() {
       await startRecording();
       setMicPermission("granted");
       console.log("Recording started successfully");
-      showToast("success", "Recording Started", "Listening for audio...");
+      showToast("success", "Recording Started", "🎙️ Listening for audio...");
     } catch (error) {
       console.error("Failed to start recording:", error);
-      if (
-        error instanceof Error &&
-        (error.message.includes("Permission denied") ||
-          error.name === "NotAllowedError")
-      ) {
-        setMicPermission("denied");
-        showToast(
-          "error",
-          "Microphone Access Denied",
-          "Please enable microphone access and try again",
-        );
+
+      if (error instanceof Error) {
+        if (
+          error.name === "NotAllowedError" ||
+          error.message.includes("Permission denied")
+        ) {
+          setMicPermission("denied");
+          setShowMicModal(true);
+          showToast(
+            "error",
+            "Microphone Access Denied",
+            "Please enable microphone access to start recording",
+          );
+        } else if (error.name === "NotFoundError") {
+          setMicPermission("denied");
+          showToast(
+            "error",
+            "No Microphone Found",
+            "Please connect a microphone and try again",
+          );
+        } else if (error.name === "NotReadableError") {
+          showToast(
+            "error",
+            "Microphone Busy",
+            "Microphone is being used by another application",
+          );
+        } else if (error.name === "OverconstrainedError") {
+          showToast(
+            "error",
+            "Microphone Settings Error",
+            "Please check your microphone settings and try again",
+          );
+        } else if (error.name === "NotSupportedError") {
+          showToast(
+            "error",
+            "Not Supported",
+            "Your browser doesn't support audio recording",
+          );
+        } else if (error.message.includes("microphone")) {
+          setMicPermission("denied");
+          setShowMicModal(true);
+          showToast(
+            "error",
+            "Microphone Error",
+            "There was an issue accessing your microphone",
+          );
+        } else {
+          showToast(
+            "error",
+            "Recording Error",
+            "Failed to start recording. Please try again.",
+          );
+        }
       } else {
-        showToast("error", "Recording Error", "Failed to start recording");
+        showToast("error", "Recording Error", "An unexpected error occurred");
       }
     }
   }, [connectionStatus.state, connect, sendMessage, startRecording, showToast]);
 
   const handleStopRecording = useCallback(() => {
+    console.log(
+      "[FANO] Stopping recording and preparing to send complete audio...",
+    );
+
+    // Stop the recording (this will trigger onRecordingComplete callback)
     stopRecording();
 
     // Reset recovery state
@@ -843,19 +1138,35 @@ export default function HomePage() {
     setBufferedFinalTranscript("");
     setBufferedInterimTranscript("");
 
-    if (connectionStatus.state === "connected") {
-      const eofMessage: FanoSTTRequest = {
-        event: "request",
-        data: "EOF",
-      };
+    // Send EOF after a short delay to ensure complete audio is sent first
+    setTimeout(() => {
+      if (connectionStatus.state === "connected") {
+        const eofMessage: FanoSTTRequest = {
+          event: "request",
+          data: "EOF",
+        };
 
-      console.log("[FANO AUTH] Sending EOF :", eofMessage);
-      setLastRequest(eofMessage);
-      sendMessage(eofMessage);
-    }
+        console.log(
+          "[FANO AUTH] Sending EOF after complete recording:",
+          eofMessage,
+        );
+        setLastRequest(eofMessage);
+        sendMessage(eofMessage);
+      }
+    }, 500); // 500ms delay to ensure complete audio is sent first
 
     showToast("success", "Recording Stopped", "Transcription completed");
-  }, [stopRecording, sendMessage, showToast, connectionStatus.state]);
+  }, [stopRecording, connectionStatus.state, sendMessage, showToast]);
+
+  const handlePauseRecording = useCallback(() => {
+    pauseRecording();
+    showToast("info", "Recording Paused", "⏸️ Recording has been paused");
+  }, [pauseRecording, showToast]);
+
+  const handleResumeRecording = useCallback(() => {
+    resumeRecording();
+    showToast("info", "Recording Resumed", "▶️ Recording has been resumed");
+  }, [resumeRecording, showToast]);
 
   // Auto-scroll transcript
   useEffect(() => {
@@ -908,37 +1219,177 @@ export default function HomePage() {
   };
 
   const renderAudioVisualizer = () => {
-    if (!isRecording || !audioData) {
+    const currentLevel =
+      manualAudioLevel !== null ? manualAudioLevel : audioLevel || 0;
+
+    // Show animated waiting bars when not recording
+    if (!isRecording) {
       return (
         <div className="h-32 flex items-center justify-center">
           <div className="flex space-x-1">
             {[...Array(20)].map((_, i) => (
-              <div
+              <motion.div
                 key={i}
-                className="w-1 bg-primary-500/30 rounded-full transition-all duration-300"
-                style={{ height: "8px" }}
+                className="w-2 bg-primary-500/20 rounded-full"
+                initial={{ height: 8 }}
+                animate={{
+                  height: [8, 16, 8],
+                  opacity: [0.2, 0.6, 0.2],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  delay: i * 0.1,
+                  ease: "easeInOut",
+                }}
               />
             ))}
+          </div>
+          <div className="absolute text-xs text-white/40 mt-16">
+            Start recording to see visualization
           </div>
         </div>
       );
     }
 
-    return (
-      <div className="h-32 flex items-end justify-center space-x-1">
-        {Array.from(audioData.frequencyData)
-          .slice(0, 20)
-          .map((value, i) => (
-            <motion.div
-              key={i}
-              className="w-2 bg-gradient-to-t from-primary-500 to-secondary-500 rounded-full"
-              style={{ height: `${Math.max(4, (value / 255) * 120)}px` }}
-              animate={{ height: `${Math.max(4, (value / 255) * 120)}px` }}
-              transition={{ duration: 0.1 }}
-            />
-          ))}
-      </div>
-    );
+    // Fallback visualization using audio level when frequency data is not available
+    if (
+      !audioData ||
+      !audioData.frequencyData ||
+      audioData.frequencyData.length === 0
+    ) {
+      console.log(
+        "[AUDIO VIZ] Using fallback visualization, audioLevel:",
+        currentLevel,
+      );
+
+      return (
+        <div className="h-32 flex items-end justify-center space-x-0.5">
+          {[...Array(24)].map((_, i) => {
+            // Create pseudo-frequency bars based on audio level and position
+            const position = i / 23; // Normalize position 0-1
+            const centerDistance = Math.abs(position - 0.5) * 2; // Distance from center
+            const baseHeight = Math.max(
+              4,
+              currentLevel * 80 * (1 - centerDistance * 0.7),
+            );
+
+            // Add some variation
+            const variation =
+              Math.sin(Date.now() / 100 + i) * currentLevel * 10;
+            const finalHeight = Math.min(
+              120,
+              Math.max(4, baseHeight + variation),
+            );
+
+            const intensity = currentLevel;
+            const colorClass =
+              intensity > 0.6
+                ? "from-green-400 to-green-600"
+                : intensity > 0.3
+                  ? "from-blue-400 to-blue-600"
+                  : intensity > 0.1
+                    ? "from-yellow-400 to-yellow-600"
+                    : "from-primary-500 to-secondary-500";
+
+            return (
+              <motion.div
+                key={i}
+                className={`w-2 bg-gradient-to-t ${colorClass} rounded-full shadow-sm`}
+                animate={{
+                  height: `${finalHeight}px`,
+                  opacity: intensity > 0.05 ? 1 : 0.3,
+                }}
+                transition={{
+                  duration: 0.1,
+                  ease: "easeOut",
+                }}
+              />
+            );
+          })}
+
+          <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 text-xs text-white/60 mb-1 text-center">
+            <div>Level: {Math.round(currentLevel * 100)}%</div>
+            <div className="text-yellow-400/60">Fallback Mode</div>
+          </div>
+        </div>
+      );
+    }
+
+    // Active visualization with frequency data
+    try {
+      const frequencyBars = Array.from(audioData.frequencyData).slice(0, 24);
+      console.log(
+        "[AUDIO VIZ] Using frequency data, bars:",
+        frequencyBars.length,
+        "level:",
+        currentLevel,
+      );
+
+      return (
+        <div className="h-32 flex items-end justify-center space-x-0.5">
+          {frequencyBars.map((value, i) => {
+            // Enhanced height calculation with minimum threshold
+            const normalizedValue = Math.max(0, Math.min(1, value / 255));
+            const baseHeight = Math.max(4, normalizedValue * 100);
+
+            // Add boost from overall audio level
+            const levelBoost = currentLevel * 15;
+            const finalHeight = Math.min(120, baseHeight + levelBoost);
+
+            // Dynamic color based on frequency intensity
+            const intensity = Math.max(normalizedValue, currentLevel * 0.5);
+            const colorClass =
+              intensity > 0.7
+                ? "from-green-400 to-green-600"
+                : intensity > 0.4
+                  ? "from-blue-400 to-blue-600"
+                  : intensity > 0.2
+                    ? "from-yellow-400 to-yellow-600"
+                    : "from-primary-500 to-secondary-500";
+
+            return (
+              <motion.div
+                key={i}
+                className={`w-2 bg-gradient-to-t ${colorClass} rounded-full shadow-sm`}
+                animate={{
+                  height: `${finalHeight}px`,
+                  boxShadow:
+                    intensity > 0.5
+                      ? `0 0 6px ${intensity > 0.7 ? "#10b981" : "#3b82f6"}55`
+                      : "none",
+                }}
+                transition={{
+                  duration: 0.08,
+                  ease: "easeOut",
+                }}
+              />
+            );
+          })}
+
+          <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 text-xs text-white/60 mb-1 text-center">
+            <div>Level: {Math.round(currentLevel * 100)}%</div>
+            <div className="text-green-400/60">Frequency Data</div>
+          </div>
+        </div>
+      );
+    } catch (error) {
+      console.error("[AUDIO VIZ] Error rendering frequency data:", error);
+
+      // Error fallback - show simple level indicator
+      return (
+        <div className="h-32 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-16 h-16 rounded-full border-4 border-red-500/30 flex items-center justify-center mb-2">
+              <span className="text-red-400 text-lg font-bold">
+                {Math.round(currentLevel * 100)}%
+              </span>
+            </div>
+            <div className="text-xs text-red-400">Visualization Error</div>
+          </div>
+        </div>
+      );
+    }
   };
 
   const renderToast = (toast: Toast) => {
@@ -1249,39 +1700,133 @@ export default function HomePage() {
                   transition={{ duration: 0.3 }}
                   className="space-y-6"
                 >
-                  {/* Microphone Status */}
+                  {/* Enhanced Microphone Status */}
                   <div className="glass rounded-2xl p-6">
                     <div className="text-center mb-4">
-                      <h3 className="text-lg font-semibold text-white mb-2">
+                      <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-center gap-2">
+                        <MicrophoneIcon className="w-5 h-5" />
                         Microphone Status
                       </h3>
-                      <div className="flex items-center justify-center space-x-2 mb-3">
+
+                      {/* Status Indicator */}
+                      <div className="flex items-center justify-center space-x-3 mb-4">
                         <div
-                          className={`w-3 h-3 rounded-full ${
+                          className={`w-4 h-4 rounded-full flex items-center justify-center ${
                             micPermission === "granted"
-                              ? "bg-green-500"
+                              ? "bg-green-500 shadow-green-500/50 shadow-lg"
                               : micPermission === "denied"
-                                ? "bg-red-500"
+                                ? "bg-red-500 shadow-red-500/50 shadow-lg"
                                 : micPermission === "checking"
-                                  ? "bg-yellow-500 animate-pulse"
+                                  ? "bg-yellow-500 animate-pulse shadow-yellow-500/50 shadow-lg"
                                   : "bg-gray-500"
                           }`}
-                        ></div>
-                        <span className="text-sm text-white/80">
+                        >
+                          {micPermission === "granted" && (
+                            <CheckCircleIcon className="w-2.5 h-2.5 text-white" />
+                          )}
+                          {micPermission === "denied" && (
+                            <XCircleIcon className="w-2.5 h-2.5 text-white" />
+                          )}
+                        </div>
+                        <span className="text-base font-medium text-white">
                           {micPermission === "granted"
-                            ? "Microphone Ready"
+                            ? "✓ Microphone Ready"
                             : micPermission === "denied"
-                              ? "Microphone Blocked"
+                              ? "✗ Access Blocked"
                               : micPermission === "checking"
-                                ? "Checking Permission"
-                                : "Permission Required"}
+                                ? "⏳ Requesting Access..."
+                                : "⚡ Permission Required"}
                         </span>
                       </div>
+
+                      {/* Permission Status Details */}
+                      {micPermission === "granted" && (
+                        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mb-4">
+                          <p className="text-sm text-green-400 font-medium mb-1">
+                            🎙️ Microphone Access Granted
+                          </p>
+                          <p className="text-xs text-green-300/80">
+                            You can now start live recording. Your audio will be
+                            processed in real-time.
+                          </p>
+                        </div>
+                      )}
+
                       {micPermission === "denied" && (
-                        <p className="text-xs text-red-400 mb-3">
-                          Please enable microphone access in your browser
-                          settings
-                        </p>
+                        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4 space-y-4">
+                          <div className="text-left">
+                            <p className="text-sm text-red-400 font-medium mb-2">
+                              🚫 Microphone Access Blocked
+                            </p>
+                            <p className="text-xs text-red-300/80 mb-3">
+                              To use live recording, please enable microphone
+                              access:
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={requestMicrophonePermission}
+                            className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-blue-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                          >
+                            <MicrophoneIcon className="w-4 h-4" />
+                            Try Again
+                          </button>
+
+                          <div className="text-left bg-gray-900/30 rounded-lg p-3 space-y-2">
+                            <p className="text-xs text-gray-300 font-medium">
+                              Manual Setup Instructions:
+                            </p>
+                            <div className="text-xs text-gray-400 space-y-1">
+                              <p>
+                                • Chrome: Click 🔒 or 🎙️ icon in address bar
+                              </p>
+                              <p>
+                                • Firefox: Click 🔒 icon, then "Permissions"
+                              </p>
+                              <p>
+                                • Safari: Safari menu → Settings → Websites →
+                                Microphone
+                              </p>
+                              <p>• Edge: Click 🔒 icon next to the URL</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {micPermission === "prompt" && (
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 mb-4 space-y-3">
+                          <div className="text-center">
+                            <p className="text-sm text-yellow-400 font-medium mb-2">
+                              🎤 Enable Microphone Access
+                            </p>
+                            <p className="text-xs text-yellow-300/80 mb-4">
+                              Click the button below and allow microphone access
+                              when prompted by your browser.
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={requestMicrophonePermission}
+                            className="w-full px-4 py-2.5 bg-gradient-to-r from-green-500 to-green-600 text-white text-sm font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-green-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                          >
+                            <MicrophoneIcon className="w-4 h-4" />
+                            Enable Microphone
+                          </button>
+                        </div>
+                      )}
+
+                      {micPermission === "checking" && (
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-4">
+                          <div className="flex items-center justify-center gap-2 mb-2">
+                            <div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                            <p className="text-sm text-yellow-400 font-medium">
+                              Requesting Permission...
+                            </p>
+                          </div>
+                          <p className="text-xs text-yellow-300/80">
+                            Please respond to your browser's permission prompt
+                          </p>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1294,10 +1839,42 @@ export default function HomePage() {
                       </h3>
                       {isRecording && (
                         <div className="space-y-2">
-                          <p className="text-sm text-white/60">
-                            Level: {Math.round(audioLevel * 100)}% •{" "}
-                            {formatDuration(recordingTime)}
-                          </p>
+                          <div className="space-y-1">
+                            <p className="text-sm text-white/60">
+                              Level:{" "}
+                              {Math.round(
+                                (manualAudioLevel !== null
+                                  ? manualAudioLevel
+                                  : audioLevel || 0) * 100,
+                              )}
+                              % • {formatDuration(recordingTime)}
+                              {manualAudioLevel !== null && (
+                                <span className="text-blue-400 ml-1">
+                                  (Manual)
+                                </span>
+                              )}
+                            </p>
+                            <div className="flex items-center justify-center space-x-4 text-xs">
+                              <span className="text-white/40">
+                                Data: {audioData ? "✓" : "✗"}
+                              </span>
+                              <span className="text-white/40">
+                                Quality: {audioQuality}
+                              </span>
+                              <button
+                                onClick={testAudioVisualization}
+                                className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-white/60 hover:text-white/80 transition-colors"
+                              >
+                                Debug
+                              </button>
+                              <button
+                                onClick={testManualAudioLevel}
+                                className="px-2 py-1 bg-blue-500/20 hover:bg-blue-500/30 rounded text-blue-400/60 hover:text-blue-400/80 transition-colors"
+                              >
+                                Test Level
+                              </button>
+                            </div>
+                          </div>
                           <div className="flex items-center justify-center space-x-2">
                             <div
                               className={`w-2 h-2 rounded-full ${
@@ -1397,22 +1974,41 @@ export default function HomePage() {
                     <div className="flex justify-center space-x-4">
                       {!isRecording ? (
                         <button
-                          onClick={handleStartRecording}
+                          onClick={() => {
+                            if (
+                              micPermission === "denied" ||
+                              micPermission === "prompt"
+                            ) {
+                              setShowMicModal(true);
+                            } else if (
+                              connectionStatus.state === "connected" &&
+                              !isSendingCompleteAudio
+                            ) {
+                              handleStartRecording();
+                            }
+                          }}
                           className="relative group"
                           disabled={
                             connectionStatus.state !== "connected" ||
-                            micPermission === "denied"
+                            isSendingCompleteAudio
                           }
                         >
                           <div
                             className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 group-hover:scale-105 ${
                               connectionStatus.state !== "connected" ||
-                              micPermission === "denied"
+                              isSendingCompleteAudio
                                 ? "bg-gray-500 cursor-not-allowed"
-                                : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
+                                : micPermission === "denied" ||
+                                    micPermission === "prompt"
+                                  ? "bg-orange-500 hover:bg-orange-600 cursor-pointer"
+                                  : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
                             }`}
                           >
-                            <MicrophoneIconSolid className="w-8 h-8 text-white" />
+                            {isSendingCompleteAudio ? (
+                              <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <MicrophoneIconSolid className="w-8 h-8 text-white" />
+                            )}
                           </div>
                           {connectionStatus.state === "connected" &&
                             micPermission !== "denied" && (
@@ -1420,25 +2016,43 @@ export default function HomePage() {
                             )}
                         </button>
                       ) : (
-                        <div className="flex space-x-3">
+                        <div className="flex items-center space-x-4">
+                          {/* Pause/Resume Button */}
                           <button
                             onClick={
-                              isPaused ? resumeRecording : pauseRecording
+                              isPaused
+                                ? handleResumeRecording
+                                : handlePauseRecording
                             }
-                            className="w-12 h-12 bg-gradient-to-br from-yellow-500 to-orange-500 rounded-full flex items-center justify-center shadow-lg hover:shadow-yellow-500/30 hover:shadow-xl transition-all duration-300 hover:scale-105"
+                            disabled={isSendingCompleteAudio}
+                            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 ${
+                              isSendingCompleteAudio
+                                ? "bg-gray-500 cursor-not-allowed"
+                                : "bg-gradient-to-br from-blue-500 to-blue-600 hover:shadow-blue-500/30 hover:shadow-xl"
+                            }`}
                           >
                             {isPaused ? (
                               <PlayIcon className="w-6 h-6 text-white ml-1" />
                             ) : (
-                              <PauseIconSolid className="w-6 h-6 text-white" />
+                              <PauseIconSolid className="w-5 h-5 text-white" />
                             )}
                           </button>
 
+                          {/* Stop Button */}
                           <button
                             onClick={handleStopRecording}
-                            className="w-12 h-12 bg-gradient-to-br from-gray-600 to-gray-700 rounded-full flex items-center justify-center shadow-lg hover:shadow-gray-500/30 hover:shadow-xl transition-all duration-300 hover:scale-105"
+                            disabled={isSendingCompleteAudio}
+                            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 ${
+                              isSendingCompleteAudio
+                                ? "bg-gray-500 cursor-not-allowed"
+                                : "bg-gradient-to-br from-gray-600 to-gray-700 hover:shadow-gray-500/30 hover:shadow-xl"
+                            }`}
                           >
-                            <StopIcon className="w-6 h-6 text-white" />
+                            {isSendingCompleteAudio ? (
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <StopIcon className="w-5 h-5 text-white" />
+                            )}
                           </button>
                         </div>
                       )}
@@ -1446,19 +2060,30 @@ export default function HomePage() {
 
                     <div className="text-center mt-4">
                       <p className="text-sm text-white/60">
-                        {!isRecording
-                          ? micPermission === "denied"
-                            ? "Microphone access required"
-                            : connectionStatus.state === "connected"
-                              ? "Click to start recording"
-                              : "Connecting..."
-                          : isPaused
-                            ? "Recording paused"
-                            : "Recording in progress..."}
+                        {isSendingCompleteAudio
+                          ? "📤 Sending complete recording to FANO STT..."
+                          : !isRecording
+                            ? micPermission === "denied"
+                              ? "🎙️ Click to enable microphone access"
+                              : micPermission === "prompt"
+                                ? "🎤 Click to request microphone permission"
+                                : micPermission === "checking"
+                                  ? "⏳ Requesting microphone access..."
+                                  : connectionStatus.state === "connected"
+                                    ? "🎙️ Click to start live recording"
+                                    : "🔌 Connecting to FANO STT..."
+                            : isPaused
+                              ? "⏸️ Recording paused - click to resume"
+                              : "🔴 Recording in progress..."}
                       </p>
                       {isRecording && (
                         <div className="mt-2 text-xs text-white/40">
                           Streaming to FANO STT in real-time
+                        </div>
+                      )}
+                      {isSendingCompleteAudio && (
+                        <div className="mt-2 text-xs text-blue-400 animate-pulse">
+                          Processing complete audio recording...
                         </div>
                       )}
                     </div>
@@ -1596,6 +2221,75 @@ export default function HomePage() {
           </motion.div>
         </div>
       </div>
+
+      {/* Microphone Permission Modal */}
+      <AnimatePresence>
+        {showMicModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowMicModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-gradient-to-br from-gray-900 to-black border border-white/10 rounded-2xl shadow-2xl max-w-md w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center">
+                <div className="w-16 h-16 bg-gradient-to-br from-red-500 to-orange-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <MicrophoneIcon className="w-8 h-8 text-white" />
+                </div>
+
+                <h3 className="text-xl font-bold text-white mb-2">
+                  Microphone Access Required
+                </h3>
+
+                <p className="text-gray-300 text-sm mb-6">
+                  To use live recording, please enable microphone access for
+                  this website.
+                </p>
+
+                {micPermission === "denied" && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4 text-left">
+                    <p className="text-red-400 text-sm font-medium mb-2">
+                      Manual Setup Required
+                    </p>
+                    <div className="text-xs text-red-300/80 space-y-1">
+                      <p>
+                        1. Click the 🔒 or 🎙️ icon in your browser's address bar
+                      </p>
+                      <p>2. Select "Allow" for microphone access</p>
+                      <p>3. Refresh the page if needed</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowMicModal(false)}
+                    className="flex-1 px-4 py-2 text-gray-400 hover:text-white transition-colors border border-gray-600 hover:border-gray-500 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setShowMicModal(false);
+                      await requestMicrophonePermission();
+                    }}
+                    className="flex-1 px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all shadow-lg hover:shadow-green-500/30"
+                  >
+                    Enable Access
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Toast Notifications */}
       <div className="fixed top-20 right-4 z-50 space-y-2">
