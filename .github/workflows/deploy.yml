@@ -53,8 +53,9 @@ jobs:
             # Remove old images to free space
             docker system prune -f
 
-            # Build and start services
-            docker-compose -f docker-compose.yml up --build -d
+            # Build and start services with build args
+            NEXT_PUBLIC_WEBSOCKET_URL=ws://143.198.192.233:8080 docker-compose -f docker-compose.yml build --no-cache
+            docker-compose -f docker-compose.yml up -d
 
             # Show status
             docker-compose -f docker-compose.yml ps
