@@ -159,14 +159,14 @@ wss.on("connection", (clientWs, request) => {
 
 // Start server
 server.listen(PROXY_PORT, () => {
-  console.log(`FANO STT Proxy Server running on ws://localhost:${PROXY_PORT}`);
+  console.log(`FANO STT Proxy Server running on ws://10.104.0.2:${PROXY_PORT}`);
   console.log(
-    `Update your frontend to connect to: ws://localhost:${PROXY_PORT}`,
+    `Update your frontend to connect to: ws://10.104.0.2:${PROXY_PORT}`,
   );
   console.log("");
   console.log("Usage:");
   console.log("1. Run: node proxy-server.js");
-  console.log("2. Update WEBSOCKET_URL to: ws://localhost:8080");
+  console.log("2. Update WEBSOCKET_URL to: ws://10.104.0.2:8080");
   console.log(
     "3. Your frontend will connect through this proxy with proper Authorization header",
   );

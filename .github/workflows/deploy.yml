@@ -35,6 +35,19 @@ jobs:
             # Pull latest changes
             git pull origin main
 
+            # Create/update environment file
+            cat > .env << 'ENVEOF'
+AUTH_TOKEN=$AUTH_TOKEN
+WEBSOCKET_URL=ws://10.104.0.2:8080
+NEXT_PUBLIC_WEBSOCKET_URL=ws://143.198.192.233:8080
+WEB_PORT=3001
+PROXY_PORT=8080
+NODE_ENV=production
+NEXT_TELEMETRY_DISABLED=1
+PORT=3001
+HOSTNAME=0.0.0.0
+ENVEOF
+
             # Stop existing services
             docker-compose -f docker-compose.yml down || true
 
@@ -67,7 +80,7 @@ jobs:
               echo "✅ Services are running"
 
               # Test health endpoint if available
-              if curl -f http://10.104.0.2:3001/api/health >/dev/null 2>&1; then
+              if curl -f http://localhost:3001/api/health >/dev/null 2>&1; then
                 echo "✅ Health check passed"
               else
                 echo "⚠️ Health check failed, but containers are running"
