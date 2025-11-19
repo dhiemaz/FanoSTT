@@ -109,10 +109,10 @@ function FooterSection() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2 text-xs text-white/40">
+              {/*<div className="flex items-center space-x-2 text-xs text-white/40">
                 <div className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-pulse"></div>
                 <span>WebSocket Connected</span>
-              </div>
+              </div>*/}
             </div>
           </div>
         </div>
