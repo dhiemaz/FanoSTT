@@ -88,6 +88,22 @@ export default function HomePage() {
   function handleWebSocketMessage(message: any) {
     console.log("📨 [FANO MESSAGE] Received message:", message);
 
+    // Handle EOF response (end of file upload processing)
+    if (message.event === "response" && message.data === "EOF") {
+      console.log("🏁 [FANO] File processing completed - EOF received");
+      console.log(
+        `📋 [FANO] Final aggregated transcript: "${finalTranscript}"`,
+      );
+      console.log(`📊 [FANO] Total transcript segments: ${transcripts.length}`);
+      setIsProcessing(false);
+      showToast(
+        "success",
+        "Transcription Complete",
+        `Successfully processed audio file with ${transcripts.length} segments`,
+      );
+      return;
+    }
+
     if (message.event === "response" && message.data?.results) {
       const results = message.data.results;
 
@@ -95,13 +111,20 @@ export default function HomePage() {
         if (result.alternatives && result.alternatives.length > 0) {
           const transcript = result.alternatives[0].transcript;
           const confidence = result.alternatives[0].confidence || 0;
+          const startTime = result.alternatives[0].startTime || "0s";
+          const endTime = result.alternatives[0].endTime || "0s";
 
           if (result.isFinal) {
-            setFinalTranscript((prev) => prev + transcript + " ");
+            console.log(
+              `📝 [FANO] Final transcript segment: "${transcript}" (${confidence.toFixed(3)})`,
+            );
+
+            // Add space only if there's existing content
+            setFinalTranscript((prev) => prev + (prev ? " " : "") + transcript);
             setInterimTranscript("");
 
             const segment: TranscriptSegment = {
-              id: Date.now().toString(),
+              id: `${Date.now()}-${Math.random()}`,
               text: transcript,
               confidence,
               startTime: Date.now(),
@@ -110,6 +133,13 @@ export default function HomePage() {
             };
 
             setTranscripts((prev) => [...prev, segment]);
+
+            // Log aggregated transcript progress for file uploads
+            if (isProcessing) {
+              console.log(
+                `📊 [FANO] Aggregated ${transcripts.length + 1} segments. Current: "${finalTranscript}"`,
+              );
+            }
           } else {
             setInterimTranscript(transcript);
           }
@@ -291,10 +321,7 @@ export default function HomePage() {
       );
       sendMessage(configMessage);
 
-      // Get audio metadata
-      const metadata = await getDetailedAudioMetadata(selectedFile);
-
-      // Process file in chunks
+      // Process entire file as single audio content
       const arrayBuffer = await selectedFile.arrayBuffer();
       const audioContext = new (window.AudioContext ||
         (window as any).webkitAudioContext)();
@@ -306,37 +333,31 @@ export default function HomePage() {
       // Convert to Int16Array
       const int16Data = float32ToInt16(channelData);
 
-      // Split into chunks
-      const chunks = splitAudioIntoChunks(int16Data, 1000, metadata.sampleRate);
+      // Convert entire audio to base64
+      const base64Data = audioBufferToBase64(int16Data);
 
-      // Send chunks
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        if (!chunk) continue;
-        const base64Data = audioBufferToBase64(new Int16Array(chunk.data));
+      // Send entire audio file as single message
+      const audioMessage: FanoSTTRequest = {
+        event: "request",
+        data: {
+          audioContent: base64Data,
+        },
+      };
 
-        const chunkMessage: FanoSTTRequest = {
-          event: "request",
-          data: {
-            audioContent: base64Data,
-          },
-        };
+      console.log(
+        "📤 [FANO AUTH] Sending complete audio file via authenticated connection",
+      );
+      console.log(
+        "🔄 [FANO AUTH] Starting transcript aggregation - waiting for response segments...",
+      );
+      sendMessage(audioMessage);
+      setUploadProgress(100);
 
-        console.log(
-          `📤 [FANO AUTH] Sending audio chunk ${i + 1}/${chunks.length} via authenticated connection`,
-        );
-        sendMessage(chunkMessage);
-        setUploadProgress(Math.round(((i + 1) / chunks.length) * 100));
-
-        // Log progress every 10 chunks
-        if (i % 10 === 0) {
-          console.log(
-            `📤 [FANO AUTH] Progress: ${i + 1}/${chunks.length} chunks sent using bearer token`,
-          );
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
+      showToast(
+        "info",
+        "Processing Audio",
+        "Audio sent, waiting for transcription results...",
+      );
 
       // Send EOF
       const eofMessage: FanoSTTRequest = {
@@ -349,16 +370,16 @@ export default function HomePage() {
         eofMessage,
       );
       console.log(
-        "📤 [FANO AUTH] File processing complete - all data sent with valid auth token",
+        "📤 [FANO AUTH] File upload complete - now aggregating transcript responses...",
       );
       sendMessage(eofMessage);
       audioContext.close();
-      showToast("success", "Upload Complete", "File processed successfully");
+      // Don't show completion toast here - wait for EOF response
     } catch (error) {
       console.error("File processing error:", error);
       showToast("error", "Processing Error", "Failed to process audio file");
-    } finally {
       setIsProcessing(false);
+    } finally {
       setUploadProgress(0);
     }
   }, [selectedFile, connectionStatus.state, sendMessage, showToast]);
@@ -709,11 +730,38 @@ export default function HomePage() {
                             }
                           >
                             {isProcessing ? (
-                              <span className="loading-dots">
-                                <span></span>
-                                <span></span>
-                                <span></span>
-                              </span>
+                              uploadProgress === 0 ? (
+                                <>
+                                  <span className="loading-dots">
+                                    <span></span>
+                                    <span></span>
+                                    <span></span>
+                                  </span>
+                                  <span className="ml-2">Sending Audio...</span>
+                                </>
+                              ) : uploadProgress === 100 ? (
+                                <>
+                                  <span className="loading-dots">
+                                    <span></span>
+                                    <span></span>
+                                    <span></span>
+                                  </span>
+                                  <span className="ml-2">
+                                    Processing Transcription...
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="loading-dots">
+                                    <span></span>
+                                    <span></span>
+                                    <span></span>
+                                  </span>
+                                  <span className="ml-2">
+                                    Aggregating Results...
+                                  </span>
+                                </>
+                              )
                             ) : (
                               "Process File"
                             )}

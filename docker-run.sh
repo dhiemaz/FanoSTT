@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# Fano STT - Simple Docker Run Script
-# This script builds and runs the Fano STT application in Docker
-
 set -e
 
 # Colors for output
