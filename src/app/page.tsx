@@ -65,6 +65,35 @@ export default function HomePage() {
   const [hasActiveRequest, setHasActiveRequest] = useState(false);
   const [isSendingFile, setIsSendingFile] = useState(false);
 
+  // Microphone permission state
+  const [micPermission, setMicPermission] = useState<
+    "granted" | "denied" | "prompt" | "checking"
+  >("checking");
+  const [audioQuality, setAudioQuality] = useState<
+    "excellent" | "good" | "fair" | "poor"
+  >("good");
+
+  // Streaming status state
+  const [chunksStreamed, setChunksStreamed] = useState(0);
+  const [streamingRate, setStreamingRate] = useState(0);
+  const [lastChunkTime, setLastChunkTime] = useState<number | null>(null);
+  const [bytesStreamed, setBytesStreamed] = useState(0);
+
+  // Recovery state
+  const [isRecovering, setIsRecovering] = useState(false);
+  const [recoveryAttempts, setRecoveryAttempts] = useState(0);
+  const [wasRecordingBeforeDisconnect, setWasRecordingBeforeDisconnect] =
+    useState(false);
+  const [pendingChunks, setPendingChunks] = useState<any[]>([]);
+
+  // Transcript persistence during recovery
+  const [bufferedTranscripts, setBufferedTranscripts] = useState<
+    TranscriptSegment[]
+  >([]);
+  const [bufferedFinalTranscript, setBufferedFinalTranscript] = useState("");
+  const [bufferedInterimTranscript, setBufferedInterimTranscript] =
+    useState("");
+
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
@@ -122,10 +151,6 @@ export default function HomePage() {
               `[FANO] Final transcript segment: "${transcript}" (${confidence.toFixed(3)})`,
             );
 
-            // Add space only if there's existing content
-            setFinalTranscript((prev) => prev + (prev ? " " : "") + transcript);
-            setInterimTranscript("");
-
             const segment: TranscriptSegment = {
               id: `${Date.now()}-${Math.random()}`,
               text: transcript,
@@ -135,7 +160,24 @@ export default function HomePage() {
               isFinal: true,
             };
 
-            setTranscripts((prev) => [...prev, segment]);
+            if (isRecovering && wasRecordingBeforeDisconnect) {
+              // Buffer transcripts during recovery
+              setBufferedFinalTranscript(
+                (prev) => prev + (prev ? " " : "") + transcript,
+              );
+              setBufferedTranscripts((prev) => [...prev, segment]);
+              console.log(
+                "[FANO] Buffered transcript during recovery:",
+                transcript,
+              );
+            } else {
+              // Normal operation
+              setFinalTranscript(
+                (prev) => prev + (prev ? " " : "") + transcript,
+              );
+              setInterimTranscript("");
+              setTranscripts((prev) => [...prev, segment]);
+            }
 
             // Log aggregated transcript progress for file uploads
             if (isProcessing) {
@@ -144,7 +186,17 @@ export default function HomePage() {
               );
             }
           } else {
-            setInterimTranscript(transcript);
+            if (isRecovering && wasRecordingBeforeDisconnect) {
+              // Buffer interim transcript during recovery
+              setBufferedInterimTranscript(transcript);
+              console.log(
+                "[FANO] Buffered interim transcript during recovery:",
+                transcript,
+              );
+            } else {
+              // Normal operation
+              setInterimTranscript(transcript);
+            }
           }
         }
       });
@@ -191,7 +243,62 @@ export default function HomePage() {
       },
       onConnect: () => {
         console.log("[FANO] Connected with token in URL");
-        showToast("success", "Connected", "FANO STT connection established");
+
+        // Handle live recording recovery
+        if (wasRecordingBeforeDisconnect && isRecording) {
+          console.log("[FANO] Recovering live recording session");
+
+          // Send configuration first
+          const configMessage: FanoSTTRequest = {
+            event: "request",
+            data: {
+              streamingConfig: {
+                config: {
+                  languageCode: "en-SG-x-multi",
+                  sampleRateHertz: 16000,
+                  encoding: "LINEAR16",
+                  enableAutomaticPunctuation: true,
+                  singleUtterance: false,
+                  interimResults: true,
+                },
+              },
+            },
+          };
+
+          setLastRequest(configMessage);
+          sendMessage(configMessage);
+
+          // Send any pending chunks
+          if (pendingChunks.length > 0) {
+            console.log(
+              `[FANO] Sending ${pendingChunks.length} buffered chunks`,
+            );
+            pendingChunks.forEach((chunk, index) => {
+              setTimeout(() => {
+                sendMessage(chunk);
+              }, index * 50); // Send with small delay to avoid overwhelming
+            });
+            setPendingChunks([]);
+          }
+
+          setIsRecovering(false);
+          setRecoveryAttempts(0);
+
+          // Restore buffered transcripts
+          if (bufferedTranscripts.length > 0) {
+            setTranscripts(bufferedTranscripts);
+            setFinalTranscript(bufferedFinalTranscript);
+            setInterimTranscript(bufferedInterimTranscript);
+          }
+
+          showToast(
+            "success",
+            "Recording Recovered",
+            "Live recording session restored",
+          );
+        } else {
+          showToast("success", "Connected", "FANO STT connection established");
+        }
       },
       onDisconnect: () => {
         console.log("[FANO] Disconnected");
@@ -207,8 +314,28 @@ export default function HomePage() {
             "Upload Interrupted",
             "Reconnecting and retrying file upload...",
           );
+        } else if (isRecording && wasRecordingBeforeDisconnect) {
+          // Increment recovery attempts for live recording
+          setRecoveryAttempts((prev) => prev + 1);
+
+          if (recoveryAttempts < 5) {
+            showToast(
+              "warning",
+              "Connection Lost",
+              `Attempting to reconnect... (${recoveryAttempts + 1}/5)`,
+            );
+          } else {
+            setIsRecovering(false);
+            setWasRecordingBeforeDisconnect(false);
+            stopRecording();
+            showToast(
+              "error",
+              "Recovery Failed",
+              "Max reconnection attempts reached. Recording stopped.",
+            );
+          }
         } else {
-          showToast("warning", "Disconnected", "Reconnecting...");
+          showToast("warning", "Reconnecting...", "");
         }
       },
     });
@@ -255,28 +382,40 @@ export default function HomePage() {
 
   // Manual connection control - no auto-connect
 
-  // Audio chunk handler for real-time recording
-  const handleAudioChunk = useCallback(
-    (chunk: any) => {
-      if (connectionStatus.state === "connected") {
-        const int16Data = new Int16Array(chunk.data);
-        const base64Data = audioBufferToBase64(int16Data);
+  // Check microphone permission on mount
+  useEffect(() => {
+    const checkMicPermission = async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setMicPermission("denied");
+          return;
+        }
 
-        const message: FanoSTTRequest = {
-          event: "request",
-          data: {
-            audioContent: base64Data,
-          },
+        const permission = await navigator.permissions.query({
+          name: "microphone" as PermissionName,
+        });
+        setMicPermission(permission.state as "granted" | "denied" | "prompt");
+
+        permission.onchange = () => {
+          setMicPermission(permission.state as "granted" | "denied" | "prompt");
         };
-
-        setLastRequest(message);
-        sendMessage(message);
+      } catch (error) {
+        console.log("Permission API not supported, will check on first use");
+        setMicPermission("prompt");
       }
-    },
-    [connectionStatus.state, sendMessage, setLastRequest],
-  );
+    };
 
-  // Audio recorder hook
+    checkMicPermission();
+  }, []);
+
+  // Audio recorder hook - placeholder for handleAudioChunk to avoid circular dependency
+  const handleAudioChunkRef = useRef<((chunk: any) => void) | null>(null);
+
+  const handleAudioChunkPlaceholder = useCallback((chunk: any) => {
+    if (handleAudioChunkRef.current) {
+      handleAudioChunkRef.current(chunk);
+    }
+  }, []);
 
   const {
     isRecording,
@@ -290,9 +429,122 @@ export default function HomePage() {
     audioData,
     error: recordingError,
   } = useAudioRecorder({
-    onAudioChunk: handleAudioChunk,
-    onError: (error) => showToast("error", "Recording Error", error.message),
+    onAudioChunk: handleAudioChunkPlaceholder,
+    onError: (error) => {
+      showToast("error", "Recording Error", error.message);
+      if (
+        error.message.includes("Permission denied") ||
+        error.message.includes("NotAllowedError")
+      ) {
+        setMicPermission("denied");
+      }
+    },
   });
+
+  // Audio chunk handler for real-time recording (defined after useAudioRecorder)
+  const handleAudioChunk = useCallback(
+    (chunk: any) => {
+      const int16Data = new Int16Array(chunk.data);
+      const base64Data = audioBufferToBase64(int16Data);
+
+      const message: FanoSTTRequest = {
+        event: "request",
+        data: {
+          audioContent: base64Data,
+        },
+      };
+
+      if (connectionStatus.state === "connected") {
+        try {
+          setLastRequest(message);
+          sendMessage(message);
+
+          // Update streaming statistics
+          setChunksStreamed((prev) => prev + 1);
+          setBytesStreamed((prev) => prev + base64Data.length);
+
+          const now = Date.now();
+          if (lastChunkTime) {
+            const timeDiff = now - lastChunkTime;
+            setStreamingRate(1000 / timeDiff); // chunks per second
+          }
+          setLastChunkTime(now);
+
+          // Clear pending chunks on successful send
+          if (pendingChunks.length > 0) {
+            setPendingChunks([]);
+          }
+        } catch (error) {
+          console.error("Failed to send audio chunk:", error);
+          // Store chunk for retry
+          setPendingChunks((prev) => [...prev, message].slice(-50)); // Keep last 50 chunks
+        }
+      } else if (isRecording && !isRecovering) {
+        // Store chunks while disconnected
+        setPendingChunks((prev) => [...prev, message].slice(-50));
+
+        // Start recovery if not already recovering
+        if (!isRecovering && connectionStatus.state !== "connecting") {
+          setIsRecovering(true);
+          setWasRecordingBeforeDisconnect(true);
+          setRecoveryAttempts((prev) => prev + 1);
+
+          if (recoveryAttempts < 5) {
+            showToast(
+              "warning",
+              "Connection Lost",
+              `Attempting to reconnect... (${recoveryAttempts + 1}/5)`,
+            );
+
+            // Attempt to reconnect with exponential backoff
+            const delay = Math.min(1000 * Math.pow(2, recoveryAttempts), 10000);
+            setTimeout(() => {
+              connect();
+            }, delay);
+          } else {
+            // Max attempts reached
+            setIsRecovering(false);
+            setWasRecordingBeforeDisconnect(false);
+            setPendingChunks([]);
+            stopRecording();
+            showToast(
+              "error",
+              "Recovery Failed",
+              "Unable to reconnect. Recording stopped.",
+            );
+          }
+        }
+      }
+    },
+    [
+      connectionStatus.state,
+      sendMessage,
+      setLastRequest,
+      lastChunkTime,
+      pendingChunks,
+      isRecording,
+      isRecovering,
+      recoveryAttempts,
+      connect,
+      showToast,
+      stopRecording,
+    ],
+  );
+
+  // Update the ref with the actual function
+  useEffect(() => {
+    handleAudioChunkRef.current = handleAudioChunk;
+  }, [handleAudioChunk]);
+
+  // Update audio quality based on level
+  useEffect(() => {
+    if (isRecording && audioLevel > 0) {
+      if (audioLevel > 0.7) setAudioQuality("excellent");
+      else if (audioLevel > 0.4) setAudioQuality("good");
+      else if (audioLevel > 0.1) setAudioQuality("fair");
+      else setAudioQuality("poor");
+    }
+  }, [isRecording, audioLevel]);
 
   // File upload handlers
   const handleFileSelect = useCallback(
@@ -469,6 +721,25 @@ export default function HomePage() {
       connectionStatus.state,
     );
 
+    // Check microphone permission first
+    if (micPermission === "denied") {
+      showToast(
+        "error",
+        "Microphone Access Denied",
+        "Please enable microphone access in your browser settings",
+      );
+      return;
+    }
+
+    if (micPermission === "prompt") {
+      showToast(
+        "info",
+        "Requesting Permission",
+        "Please allow microphone access when prompted",
+      );
+      setMicPermission("checking");
+    }
+
     if (connectionStatus.state !== "connected") {
       console.log("Not connected, attempting to connect...");
       showToast("info", "Connecting", "Establishing connection to Fano STT...");
@@ -523,28 +794,68 @@ export default function HomePage() {
     setFinalTranscript("");
     setInterimTranscript("");
 
+    // Clear transcript buffers for new recording
+    setBufferedTranscripts([]);
+    setBufferedFinalTranscript("");
+    setBufferedInterimTranscript("");
+
     try {
+      // Reset streaming statistics
+      setChunksStreamed(0);
+      setStreamingRate(0);
+      setBytesStreamed(0);
+      setLastChunkTime(null);
+
       await startRecording();
+      setMicPermission("granted");
       console.log("Recording started successfully");
+      showToast("success", "Recording Started", "Listening for audio...");
     } catch (error) {
       console.error("Failed to start recording:", error);
-      showToast("error", "Recording Error", "Failed to start recording");
+      if (
+        error instanceof Error &&
+        (error.message.includes("Permission denied") ||
+          error.name === "NotAllowedError")
+      ) {
+        setMicPermission("denied");
+        showToast(
+          "error",
+          "Microphone Access Denied",
+          "Please enable microphone access and try again",
+        );
+      } else {
+        showToast("error", "Recording Error", "Failed to start recording");
+      }
     }
   }, [connectionStatus.state, connect, sendMessage, startRecording, showToast]);
 
   const handleStopRecording = useCallback(() => {
     stopRecording();
 
-    const eofMessage: FanoSTTRequest = {
-      event: "request",
-      data: "EOF",
-    };
+    // Reset recovery state
+    setIsRecovering(false);
+    setRecoveryAttempts(0);
+    setWasRecordingBeforeDisconnect(false);
+    setPendingChunks([]);
 
-    console.log("[FANO AUTH] Sending EOF :", eofMessage);
-    setLastRequest(eofMessage);
-    sendMessage(eofMessage);
+    // Clear transcript buffers
+    setBufferedTranscripts([]);
+    setBufferedFinalTranscript("");
+    setBufferedInterimTranscript("");
+
+    if (connectionStatus.state === "connected") {
+      const eofMessage: FanoSTTRequest = {
+        event: "request",
+        data: "EOF",
+      };
+
+      console.log("[FANO AUTH] Sending EOF :", eofMessage);
+      setLastRequest(eofMessage);
+      sendMessage(eofMessage);
+    }
+
     showToast("success", "Recording Stopped", "Transcription completed");
-  }, [stopRecording, sendMessage, showToast]);
+  }, [stopRecording, sendMessage, showToast, connectionStatus.state]);
 
   // Auto-scroll transcript
   useEffect(() => {
@@ -938,6 +1249,43 @@ export default function HomePage() {
                   transition={{ duration: 0.3 }}
                   className="space-y-6"
                 >
+                  {/* Microphone Status */}
+                  <div className="glass rounded-2xl p-6">
+                    <div className="text-center mb-4">
+                      <h3 className="text-lg font-semibold text-white mb-2">
+                        Microphone Status
+                      </h3>
+                      <div className="flex items-center justify-center space-x-2 mb-3">
+                        <div
+                          className={`w-3 h-3 rounded-full ${
+                            micPermission === "granted"
+                              ? "bg-green-500"
+                              : micPermission === "denied"
+                                ? "bg-red-500"
+                                : micPermission === "checking"
+                                  ? "bg-yellow-500 animate-pulse"
+                                  : "bg-gray-500"
+                          }`}
+                        ></div>
+                        <span className="text-sm text-white/80">
+                          {micPermission === "granted"
+                            ? "Microphone Ready"
+                            : micPermission === "denied"
+                              ? "Microphone Blocked"
+                              : micPermission === "checking"
+                                ? "Checking Permission"
+                                : "Permission Required"}
+                        </span>
+                      </div>
+                      {micPermission === "denied" && (
+                        <p className="text-xs text-red-400 mb-3">
+                          Please enable microphone access in your browser
+                          settings
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Audio Visualizer */}
                   <div className="glass rounded-2xl p-6">
                     <div className="text-center mb-4">
@@ -945,14 +1293,104 @@ export default function HomePage() {
                         Audio Visualization
                       </h3>
                       {isRecording && (
-                        <p className="text-sm text-white/60">
-                          Level: {Math.round(audioLevel * 100)}% •{" "}
-                          {formatDuration(recordingTime)}
-                        </p>
+                        <div className="space-y-2">
+                          <p className="text-sm text-white/60">
+                            Level: {Math.round(audioLevel * 100)}% •{" "}
+                            {formatDuration(recordingTime)}
+                          </p>
+                          <div className="flex items-center justify-center space-x-2">
+                            <div
+                              className={`w-2 h-2 rounded-full ${
+                                audioQuality === "excellent"
+                                  ? "bg-green-500"
+                                  : audioQuality === "good"
+                                    ? "bg-blue-500"
+                                    : audioQuality === "fair"
+                                      ? "bg-yellow-500"
+                                      : "bg-red-500"
+                              }`}
+                            ></div>
+                            <span className="text-xs text-white/60 capitalize">
+                              {audioQuality} Quality
+                            </span>
+                          </div>
+                        </div>
                       )}
                     </div>
                     {renderAudioVisualizer()}
                   </div>
+
+                  {/* Streaming Status */}
+                  {isRecording && (
+                    <div className="glass rounded-2xl p-6">
+                      <div className="text-center mb-4">
+                        <h3 className="text-lg font-semibold text-white mb-2">
+                          Streaming Status
+                        </h3>
+                        {isRecovering && (
+                          <div className="mb-4 p-3 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
+                            <div className="flex items-center justify-center space-x-2">
+                              <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
+                              <span className="text-sm text-yellow-200">
+                                Recovering Connection... (Attempt{" "}
+                                {recoveryAttempts}/5)
+                              </span>
+                            </div>
+                            {pendingChunks.length > 0 && (
+                              <div className="text-xs text-yellow-300 mt-1">
+                                {pendingChunks.length} chunks buffered
+                              </div>
+                            )}
+                            {bufferedTranscripts.length > 0 && (
+                              <div className="text-xs text-yellow-300 mt-1">
+                                {bufferedTranscripts.length} transcripts
+                                preserved
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="text-center">
+                            <div className="text-2xl font-bold text-blue-400">
+                              {chunksStreamed}
+                            </div>
+                            <div className="text-xs text-white/60">
+                              Chunks Sent
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-2xl font-bold text-green-400">
+                              {streamingRate.toFixed(1)}
+                            </div>
+                            <div className="text-xs text-white/60">
+                              Chunks/sec
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-4 flex items-center justify-center space-x-2">
+                          <div
+                            className={`w-2 h-2 rounded-full ${
+                              isRecovering
+                                ? "bg-yellow-500 animate-pulse"
+                                : connectionStatus.state === "connected"
+                                  ? "bg-green-500 animate-pulse"
+                                  : "bg-red-500"
+                            }`}
+                          ></div>
+                          <span className="text-sm text-white/80">
+                            {isRecovering
+                              ? "Reconnecting to FANO"
+                              : connectionStatus.state === "connected"
+                                ? "Live Streaming to FANO"
+                                : "Connection Lost"}
+                          </span>
+                          <div className="text-xs text-white/60">
+                            ({(bytesStreamed / 1024).toFixed(1)}KB sent)
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Recording Controls */}
                   <div className="glass rounded-2xl p-6">
@@ -961,12 +1399,25 @@ export default function HomePage() {
                         <button
                           onClick={handleStartRecording}
                           className="relative group"
-                          disabled={connectionStatus.state !== "connected"}
+                          disabled={
+                            connectionStatus.state !== "connected" ||
+                            micPermission === "denied"
+                          }
                         >
-                          <div className="w-16 h-16 bg-gradient-to-br from-red-500 to-red-600 rounded-full flex items-center justify-center shadow-lg group-hover:shadow-red-500/30 group-hover:shadow-2xl transition-all duration-300 group-hover:scale-105">
+                          <div
+                            className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 group-hover:scale-105 ${
+                              connectionStatus.state !== "connected" ||
+                              micPermission === "denied"
+                                ? "bg-gray-500 cursor-not-allowed"
+                                : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
+                            }`}
+                          >
                             <MicrophoneIconSolid className="w-8 h-8 text-white" />
                           </div>
-                          <div className="absolute -inset-2 bg-red-500/20 rounded-full opacity-0 group-hover:opacity-100 animate-ping"></div>
+                          {connectionStatus.state === "connected" &&
+                            micPermission !== "denied" && (
+                              <div className="absolute -inset-2 bg-red-500/20 rounded-full opacity-0 group-hover:opacity-100 animate-ping"></div>
+                            )}
                         </button>
                       ) : (
                         <div className="flex space-x-3">
@@ -996,13 +1447,20 @@ export default function HomePage() {
                     <div className="text-center mt-4">
                       <p className="text-sm text-white/60">
                         {!isRecording
-                          ? connectionStatus.state === "connected"
-                            ? "Click to start recording"
-                            : "Connecting..."
+                          ? micPermission === "denied"
+                            ? "Microphone access required"
+                            : connectionStatus.state === "connected"
+                              ? "Click to start recording"
+                              : "Connecting..."
                           : isPaused
                             ? "Recording paused"
                             : "Recording in progress..."}
                       </p>
+                      {isRecording && (
+                        <div className="mt-2 text-xs text-white/40">
+                          Streaming to FANO STT in real-time
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>
