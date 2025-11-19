@@ -48,9 +48,9 @@ jobs:
 
             # Stop existing services (all variants)
             echo "⏹️ Stopping existing services..."
-            docker compose -f docker-compose.ssl.yml down --remove-orphans || true
-            docker compose -f docker-compose.yml down --remove-orphans || true
-            docker compose -f docker-compose.selfsigned.yml down --remove-orphans || true
+            docker-compose -f docker-compose.ssl.yml down --remove-orphans || true
+            docker-compose -f docker-compose.yml down --remove-orphans || true
+            docker-compose -f docker-compose.selfsigned.yml down --remove-orphans || true
 
             # Clean up unused resources
             echo "🧹 Cleaning up..."
@@ -74,23 +74,23 @@ jobs:
             # Check if SSL certificates already exist
             if [ -f "ssl/live/$DOMAIN/fullchain.pem" ]; then
                 echo "✅ SSL certificates found, starting services with SSL..."
-                docker compose -f docker-compose.ssl.yml up --build --force-recreate -d
+                docker-compose -f docker-compose.ssl.yml up --build --force-recreate -d
             else
                 echo "🔒 Generating SSL certificates..."
 
                 # Start nginx first for certificate generation
-                docker compose -f docker-compose.ssl.yml up --build -d nginx
+                docker-compose -f docker-compose.ssl.yml up --build -d nginx
                 sleep 10
 
                 # Generate SSL certificate
-                docker compose -f docker-compose.ssl.yml run --rm certbot
+                docker-compose -f docker-compose.ssl.yml run --rm certbot
 
                 if [ -f "ssl/live/$DOMAIN/fullchain.pem" ]; then
                     echo "✅ SSL certificate generated successfully"
 
                     # Restart all services with SSL
-                    docker compose -f docker-compose.ssl.yml down
-                    docker compose -f docker-compose.ssl.yml up -d
+                    docker-compose -f docker-compose.ssl.yml down
+                    docker-compose -f docker-compose.ssl.yml up -d
                 else
                     echo "❌ SSL certificate generation failed, falling back to self-signed"
 
@@ -109,7 +109,7 @@ jobs:
                     cp ssl-selfsigned/live/$DOMAIN/* ssl/live/$DOMAIN/
 
                     # Start services with self-signed certificate
-                    docker compose -f docker-compose.ssl.yml up -d
+                    docker-compose -f docker-compose.ssl.yml up -d
                 fi
             fi
 
@@ -118,11 +118,11 @@ jobs:
 
             # Show service status
             echo "📊 Service status:"
-            docker compose -f docker-compose.ssl.yml ps
+            docker-compose -f docker-compose.ssl.yml ps
 
             # Check logs for immediate issues
             echo "📋 Recent logs:"
-            docker compose -f docker-compose.ssl.yml logs --tail=10 --no-color
+            docker-compose -f docker-compose.ssl.yml logs --tail=10 --no-color
 
             echo "🎉 SSL deployment completed!"
           EOF
@@ -139,7 +139,7 @@ jobs:
             echo "🔍 Verifying SSL deployment..."
 
             # Check if services are running
-            if docker compose -f docker-compose.ssl.yml ps | grep -q "Up"; then
+            if docker-compose -f docker-compose.ssl.yml ps | grep -q "Up"; then
               echo "✅ SSL services are running"
 
               # Test HTTPS endpoint (allow self-signed for testing)
@@ -164,12 +164,12 @@ jobs:
               else
                 echo "❌ HTTPS health check failed"
                 echo "Checking logs..."
-                docker compose -f docker-compose.ssl.yml logs nginx
+                docker-compose -f docker-compose.ssl.yml logs nginx
                 exit 1
               fi
             else
               echo "❌ SSL services are not running"
-              docker compose -f docker-compose.ssl.yml logs
+              docker-compose -f docker-compose.ssl.yml logs
               exit 1
             fi
           EOF
@@ -192,11 +192,11 @@ cd /opt/fano-stt
 echo "$(date): Starting certificate renewal..." >> logs/ssl-renewal.log
 
 # Attempt renewal
-docker compose -f docker-compose.ssl.yml run --rm certbot renew --webroot --webroot-path=/var/www/certbot --quiet
+docker-compose -f docker-compose.ssl.yml run --rm certbot renew --webroot --webroot-path=/var/www/certbot --quiet
 
 if [ $? -eq 0 ]; then
     # Restart nginx if renewal was successful
-    docker compose -f docker-compose.ssl.yml restart nginx
+    docker-compose -f docker-compose.ssl.yml restart nginx
     echo "$(date): SSL certificates renewed and nginx restarted" >> logs/ssl-renewal.log
 else
     echo "$(date): SSL certificate renewal failed" >> logs/ssl-renewal.log
@@ -245,4 +245,4 @@ RENEWAL_SCRIPT
           echo "4. Review deployment logs above"
           echo ""
           echo "🆘 Emergency fallback:"
-          echo "ssh into server and run: docker compose -f docker-compose.yml up -d"
+          echo "ssh into server and run: docker-compose -f docker-compose.yml up -d"
