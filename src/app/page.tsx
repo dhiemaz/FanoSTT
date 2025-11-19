@@ -88,15 +88,13 @@ export default function HomePage() {
 
   // WebSocket message handler - moved up before hook initialization
   function handleWebSocketMessage(message: any) {
-    console.log("📨 [FANO MESSAGE] Received message:", message);
+    console.log("[FANO MESSAGE] Received message:", message);
 
     // Handle EOF response (end of file upload processing)
     if (message.event === "response" && message.data === "EOF") {
-      console.log("🏁 [FANO] File processing completed - EOF received");
-      console.log(
-        `📋 [FANO] Final aggregated transcript: "${finalTranscript}"`,
-      );
-      console.log(`📊 [FANO] Total transcript segments: ${transcripts.length}`);
+      console.log("[FANO] File processing completed - EOF received");
+      console.log(`[FANO] Final aggregated transcript: "${finalTranscript}"`);
+      console.log(`[FANO] Total transcript segments: ${transcripts.length}`);
       setIsProcessing(false);
       showToast(
         "success",
@@ -118,7 +116,7 @@ export default function HomePage() {
 
           if (result.isFinal) {
             console.log(
-              `📝 [FANO] Final transcript segment: "${transcript}" (${confidence.toFixed(3)})`,
+              `[FANO] Final transcript segment: "${transcript}" (${confidence.toFixed(3)})`,
             );
 
             // Add space only if there's existing content
@@ -159,7 +157,7 @@ export default function HomePage() {
         message.data.error.message?.includes("DEADLINE_EXCEEDED")
       ) {
         console.log(
-          "⏱️ [FANO] DEADLINE_EXCEEDED detected - will retry after reconnection",
+          "[FANO] DEADLINE_EXCEEDED detected - will retry after reconnection",
         );
 
         if (!isRetrying) {
@@ -187,25 +185,25 @@ export default function HomePage() {
         showToast("error", "Connection Error", error.message);
       },
       onConnect: () => {
-        console.log("✅ [FANO] Connected with token in URL");
+        console.log("[FANO] Connected with token in URL");
         showToast("success", "Connected", "FANO STT connection established");
       },
       onDisconnect: () => {
-        console.log("🔌 [FANO] Disconnected");
+        console.log("[FANO] Disconnected");
         showToast("warning", "Disconnected", "FANO STT connection lost");
       },
     });
 
   // Handle DEADLINE_EXCEEDED error with reconnection and retry
   const handleDeadlineExceeded = useCallback(() => {
-    console.log("🔄 [FANO] Starting DEADLINE_EXCEEDED recovery process");
+    console.log("[FANO] Starting DEADLINE_EXCEEDED recovery process");
 
     // Step 1: Disconnect current connection
     disconnect();
 
     // Step 2: Wait and reconnect
     setTimeout(() => {
-      console.log("🔄 [FANO] Reconnecting after DEADLINE_EXCEEDED...");
+      console.log("[FANO] Reconnecting after DEADLINE_EXCEEDED...");
       connect();
     }, 1000);
   }, [disconnect, connect]);
@@ -226,10 +224,7 @@ export default function HomePage() {
   // Effect to handle request retry after reconnection
   useEffect(() => {
     if (connectionStatus.state === "connected" && isRetrying && lastRequest) {
-      console.log(
-        "📤 [FANO] Resending request after reconnection:",
-        lastRequest,
-      );
+      console.log("[FANO] Resending request after reconnection:", lastRequest);
 
       setTimeout(() => {
         sendMessage(lastRequest);
@@ -240,7 +235,7 @@ export default function HomePage() {
 
   // Connection test function
   const testConnection = useCallback(() => {
-    console.log("🧪 [FANO] Testing connection...");
+    console.log("[FANO] Testing connection...");
 
     if (connectionStatus.state === "connected") {
       disconnect();
@@ -380,11 +375,11 @@ export default function HomePage() {
       };
 
       console.log(
-        "📤 [FANO AUTH] Sending file processing config (requires auth token):",
+        "[FANO AUTH] Sending file processing config (requires auth token):",
         configMessage,
       );
       console.log(
-        "📤 [FANO AUTH] Using authenticated connection for file processing",
+        "[FANO AUTH] Using authenticated connection for file processing",
       );
       setLastRequest(configMessage);
       sendMessage(configMessage);
@@ -414,10 +409,10 @@ export default function HomePage() {
       };
 
       console.log(
-        "📤 [FANO AUTH] Sending complete audio file via authenticated connection",
+        "[FANO] Sending complete audio file via authenticated connection",
       );
       console.log(
-        "🔄 [FANO AUTH] Starting transcript aggregation - waiting for response segments...",
+        "[FANO] Starting transcript aggregation - waiting for response segments...",
       );
       setLastRequest(audioMessage);
       sendMessage(audioMessage);
@@ -436,11 +431,11 @@ export default function HomePage() {
       };
 
       console.log(
-        "📤 [FANO AUTH] Sending EOF message via authenticated connection:",
+        "[FANO AUTH] Sending EOF message via authenticated connection:",
         eofMessage,
       );
       console.log(
-        "📤 [FANO AUTH] File upload complete - now aggregating transcript responses...",
+        "[FANO AUTH] File upload complete - now aggregating transcript responses...",
       );
       setLastRequest(eofMessage);
       sendMessage(eofMessage);
@@ -503,11 +498,11 @@ export default function HomePage() {
     };
 
     console.log(
-      "📤 [FANO AUTH] Sending recording config (requires valid bearer token):",
+      "[FANO AUTH] Sending recording config (requires valid bearer token):",
       configMessage,
     );
     console.log(
-      "📤 [FANO AUTH] Starting real-time transcription with authenticated connection",
+      "[FANO AUTH] Starting real-time transcription with authenticated connection",
     );
     setLastRequest(configMessage);
     sendMessage(configMessage);
@@ -532,7 +527,7 @@ export default function HomePage() {
       data: "EOF",
     };
 
-    console.log("📤 [FANO AUTH] Sending EOF for recording:", eofMessage);
+    console.log("[FANO AUTH] Sending EOF for recording:", eofMessage);
     setLastRequest(eofMessage);
     sendMessage(eofMessage);
     showToast("success", "Recording Stopped", "Transcription completed");
