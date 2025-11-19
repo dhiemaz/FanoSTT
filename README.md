@@ -1,4 +1,5 @@
 # Fano STT - Advanced Speech-to-Text Web Application
+[![Deploy to Digital Ocean](https://github.com/dhiemaz/FanoSTT/actions/workflows/deploy.yml/badge.svg)](https://github.com/dhiemaz/FanoSTT/actions/workflows/deploy.yml)
 
 <div align="center">
   <img src="https://img.shields.io/badge/Next.js-14.0.4-black?style=for-the-badge&logo=next.js" alt="Next.js" />
