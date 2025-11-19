@@ -36,19 +36,19 @@ jobs:
             git pull origin main
 
             # Stop existing services
-            docker-compose -f docker-compose.prod.yml down || true
+            docker-compose -f docker-compose.yml down || true
 
             # Remove old images to free space
             docker system prune -f
 
             # Build and start services
-            docker-compose -f docker-compose.prod.yml up --build -d
+            docker-compose -f docker-compose.yml up --build -d
 
             # Show status
-            docker-compose -f docker-compose.prod.yml ps
+            docker-compose -f docker-compose.yml ps
 
             # Check logs for any immediate issues
-            docker-compose -f docker-compose.prod.yml logs --tail=20
+            docker-compose -f docker-compose.yml logs --tail=20
 
             echo "Deployment completed successfully!"
           EOF
@@ -63,18 +63,18 @@ jobs:
             sleep 10
 
             # Check if services are running
-            if docker-compose -f /opt/fano-stt/docker-compose.prod.yml ps | grep -q "Up"; then
+            if docker-compose -f /opt/fano-stt/docker-compose.yml ps | grep -q "Up"; then
               echo "✅ Services are running"
 
               # Test health endpoint if available
-              if curl -f http://localhost:3001/api/health >/dev/null 2>&1; then
+              if curl -f http://10.104.0.2:3001/api/health >/dev/null 2>&1; then
                 echo "✅ Health check passed"
               else
                 echo "⚠️ Health check failed, but containers are running"
               fi
             else
               echo "❌ Services are not running"
-              docker-compose -f /opt/fano-stt/docker-compose.prod.yml logs
+              docker-compose -f /opt/fano-stt/docker-compose.yml logs
               exit 1
             fi
           EOF
