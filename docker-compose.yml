@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  fano-stt:
+    build: .
+    container_name: fano-stt-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_FANO_WEBSOCKET_URL=${NEXT_PUBLIC_FANO_WEBSOCKET_URL:-wss://ocbc-poc.fano.ai/speech/streaming-recognize}
+      - NEXT_PUBLIC_FANO_AUTH_TOKEN=${NEXT_PUBLIC_FANO_AUTH_TOKEN}
+      - NEXT_PUBLIC_DEFAULT_LANGUAGE_CODE=${NEXT_PUBLIC_DEFAULT_LANGUAGE_CODE:-en-SG-x-multi}
+    restart: unless-stopped
