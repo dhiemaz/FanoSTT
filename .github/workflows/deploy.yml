@@ -185,23 +185,21 @@ jobs:
             echo "🔄 Setting up SSL certificate renewal..."
 
             # Create renewal script
-            cat > renew-certificates.sh << 'RENEWAL_SCRIPT'
-#!/bin/bash
-cd /opt/fano-stt
-
-echo "$(date): Starting certificate renewal..." >> logs/ssl-renewal.log
-
-# Attempt renewal
-docker-compose -f docker-compose.ssl.yml run --rm certbot renew --webroot --webroot-path=/var/www/certbot --quiet
-
-if [ $? -eq 0 ]; then
-    # Restart nginx if renewal was successful
-    docker-compose -f docker-compose.ssl.yml restart nginx
-    echo "$(date): SSL certificates renewed and nginx restarted" >> logs/ssl-renewal.log
-else
-    echo "$(date): SSL certificate renewal failed" >> logs/ssl-renewal.log
-fi
-RENEWAL_SCRIPT
+            echo '#!/bin/bash' > renew-certificates.sh
+            echo 'cd /opt/fano-stt' >> renew-certificates.sh
+            echo '' >> renew-certificates.sh
+            echo 'echo "$(date): Starting certificate renewal..." >> logs/ssl-renewal.log' >> renew-certificates.sh
+            echo '' >> renew-certificates.sh
+            echo '# Attempt renewal' >> renew-certificates.sh
+            echo 'docker-compose -f docker-compose.ssl.yml run --rm certbot renew --webroot --webroot-path=/var/www/certbot --quiet' >> renew-certificates.sh
+            echo '' >> renew-certificates.sh
+            echo 'if [ $? -eq 0 ]; then' >> renew-certificates.sh
+            echo '    # Restart nginx if renewal was successful' >> renew-certificates.sh
+            echo '    docker-compose -f docker-compose.ssl.yml restart nginx' >> renew-certificates.sh
+            echo '    echo "$(date): SSL certificates renewed and nginx restarted" >> logs/ssl-renewal.log' >> renew-certificates.sh
+            echo 'else' >> renew-certificates.sh
+            echo '    echo "$(date): SSL certificate renewal failed" >> logs/ssl-renewal.log' >> renew-certificates.sh
+            echo 'fi' >> renew-certificates.sh
 
             chmod +x renew-certificates.sh
 
