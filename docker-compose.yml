@@ -25,8 +25,8 @@ services:
       - "3001:3001"
     environment:
       - NODE_ENV=production
-      - WEBSOCKET_URL=ws://fano-proxy:8080
-      - NEXT_PUBLIC_WEBSOCKET_URL=ws://localhost:8080
+      - WEBSOCKET_URL=ws://10.104.0.2:8080
+      - NEXT_PUBLIC_WEBSOCKET_URL=ws://10.104.0.2:8080
     depends_on:
       - fano-proxy
     restart: unless-stopped

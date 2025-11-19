@@ -124,7 +124,7 @@ echo "📄 Creating environment template..."
 cat > /opt/fano-stt/.env.example << 'EOF'
 # FANO STT Configuration
 AUTH_TOKEN=your_fano_auth_token_here
-WEBSOCKET_URL=ws://localhost:8080
+WEBSOCKET_URL=ws://10.104.0.2:8080
 NEXT_PUBLIC_WEBSOCKET_URL=ws://your-domain.com:8080
 
 # Optional: Custom ports
