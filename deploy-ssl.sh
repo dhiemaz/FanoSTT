@@ -47,25 +47,22 @@ check_prerequisites() {
         exit 1
     fi
 
-    # Check if docker/podman is available
-    if command -v podman &> /dev/null; then
-        CONTAINER_CMD="podman"
-        COMPOSE_CMD="podman compose"
-        print_info "Using Podman for container management"
-    elif command -v docker &> /dev/null; then
-        CONTAINER_CMD="docker"
-        COMPOSE_CMD="docker compose"
-        print_info "Using Docker for container management"
-    else
-        print_error "Neither Docker nor Podman is installed"
+    # Check if docker and docker-compose are available
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker is not installed"
         exit 1
     fi
 
-    # Check if compose is available
-    if ! $COMPOSE_CMD version &> /dev/null; then
-        print_error "$COMPOSE_CMD is not available"
+    if ! command -v docker-compose &> /dev/null; then
+        print_error "docker-compose is not available"
+        print_info "Install with: sudo apt-get install docker-compose"
+        print_info "Or download: sudo curl -L \"https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)\" -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose"
         exit 1
     fi
+
+    CONTAINER_CMD="docker"
+    COMPOSE_CMD="docker-compose"
+    print_info "Using Docker with docker-compose"
 
     print_success "Prerequisites check passed"
 }
@@ -248,11 +245,11 @@ setup_renewal() {
 cd "$(dirname "$0")"
 
 # Renew certificates
-docker compose -f docker-compose.ssl.yml run --rm certbot renew --webroot --webroot-path=/var/www/certbot --quiet
+docker-compose -f docker-compose.ssl.yml run --rm certbot renew --webroot --webroot-path=/var/www/certbot --quiet
 
 # Restart nginx if renewal was successful
 if [ $? -eq 0 ]; then
-    docker compose -f docker-compose.ssl.yml restart nginx
+    docker-compose -f docker-compose.ssl.yml restart nginx
     echo "$(date): SSL certificates renewed successfully" >> logs/ssl-renewal.log
 else
     echo "$(date): SSL certificate renewal failed" >> logs/ssl-renewal.log
