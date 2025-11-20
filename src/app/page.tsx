@@ -96,6 +96,7 @@ export default function HomePage() {
   // Recovery state
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoveryAttempts, setRecoveryAttempts] = useState(0);
+  const [isInitialConnection, setIsInitialConnection] = useState(true);
   const [wasRecordingBeforeDisconnect, setWasRecordingBeforeDisconnect] =
     useState(false);
   const [pendingChunks, setPendingChunks] = useState<any[]>([]);
@@ -332,8 +333,11 @@ export default function HomePage() {
             "Recording Recovered",
             "Live recording session restored",
           );
+        } else if (isInitialConnection) {
+          setIsInitialConnection(false);
+          showToast("success", "Connected", "Ready to transcribe audio");
         } else {
-          showToast("success", "Connected", "FANO STT connection established");
+          showToast("success", "Reconnected", "FANO STT connection restored");
         }
       },
       onDisconnect: () => {
@@ -416,7 +420,16 @@ export default function HomePage() {
     }
   }, [connectionStatus.state, isRetrying, lastRequest, sendMessage]);
 
-  // Manual connection control - no auto-connect
+  // Auto-connect on page load
+  useEffect(() => {
+    // Auto-connect when component mounts with a slight delay for better UX
+    const timer = setTimeout(() => {
+      console.log("[FANO] Auto-connecting on page load...");
+      connect();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [connect]);
 
   // Check microphone permission on mount
   useEffect(() => {
@@ -1253,7 +1266,7 @@ export default function HomePage() {
     }
   }, [transcripts, interimTranscript]);
 
-  // Auto-connect on mount disabled
+  // Auto-connect enabled on page load
 
   const renderConnectionStatus = () => {
     const statusConfig = {
