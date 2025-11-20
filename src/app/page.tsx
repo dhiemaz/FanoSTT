@@ -417,7 +417,13 @@ export default function HomePage() {
     }
   }, [connectionStatus.state, isRetrying, lastRequest, sendMessage]);
 
-  // Connection is now handled in NavigationHeader
+  // Auto-connect on component mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      connect();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [connect]);
 
   // Scroll to top when page loads
   useEffect(() => {
@@ -1540,786 +1546,884 @@ export default function HomePage() {
   };
 
   return (
-    <div className="py-4">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-
-        {/* Main Content */}
-        <div className="grid lg:grid-cols-2 gap-8">
-          {/* Left Panel - Controls */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.4, duration: 0.6 }}
-            className="space-y-6"
-          >
-            {/* Tab Navigation */}
-            <div className="flex space-x-1 p-1 glass rounded-2xl">
-              <button
-                onClick={() => setActiveTab("upload")}
-                className={`flex-1 py-3 px-6 rounded-xl font-medium transition-all duration-300 ${
-                  activeTab === "upload"
-                    ? "bg-gradient-to-r from-primary-500 to-secondary-500 text-white shadow-lg"
-                    : "text-white/60 hover:text-white/80 hover:bg-white/5"
-                }`}
-              >
-                <DocumentArrowUpIcon className="w-5 h-5 inline mr-2" />
-                Upload Audio
-              </button>
-              <button
-                onClick={() => setActiveTab("record")}
-                className={`flex-1 py-3 px-6 rounded-xl font-medium transition-all duration-300 ${
-                  activeTab === "record"
-                    ? "bg-gradient-to-r from-primary-500 to-secondary-500 text-white shadow-lg"
-                    : "text-white/60 hover:text-white/80 hover:bg-white/5"
-                }`}
-              >
-                <MicrophoneIcon className="w-5 h-5 inline mr-2" />
-                Record Live
-              </button>
-            </div>
-
-            {/* Upload Tab */}
-            <AnimatePresence mode="wait">
-              {activeTab === "upload" && (
-                <motion.div
-                  key="upload"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-6"
+    <>
+      {/* Navigation Header */}
+      <header className="relative z-50">
+        <nav className="fixed top-0 left-0 right-0 bg-black/20 backdrop-blur-xl border-b border-white/10">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between h-16">
+              <div className="flex items-center space-x-3">
+                <div className="relative">
+                  <div className="w-10 h-10 bg-gradient-to-br from-primary-400 to-secondary-500 rounded-lg flex items-center justify-center shadow-lg">
+                    <svg
+                      className="w-6 h-6 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                      />
+                    </svg>
+                  </div>
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold gradient-text">
+                    Cortex STT
+                  </h1>
+                  <p className="text-xs text-white/60 font-medium">
+                    Advanced Speech-to-Text (Demo Version)
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <div
+                  className={`flex items-center space-x-2 px-2.5 py-1 rounded-lg border backdrop-blur-sm transition-all duration-300 ${
+                    connectionStatus.state === "connected"
+                      ? "bg-emerald-500/5 border-emerald-500/20"
+                      : connectionStatus.state === "connecting"
+                        ? "bg-amber-500/5 border-amber-500/20"
+                        : connectionStatus.state === "reconnecting"
+                          ? "bg-orange-500/5 border-orange-500/20"
+                          : connectionStatus.state === "error"
+                            ? "bg-red-500/5 border-red-500/20"
+                            : "bg-slate-500/5 border-slate-500/20"
+                  }`}
                 >
-                  {/* File Drop Zone */}
                   <div
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    className={`upload-area p-8 text-center transition-all duration-300 ${
-                      isDragOver ? "dragover" : ""
-                    } ${
-                      connectionStatus.state !== "connected" ? "opacity-50" : ""
+                    className={`w-1.5 h-1.5 rounded-full shadow-sm ${
+                      connectionStatus.state === "connected"
+                        ? "bg-emerald-400 animate-pulse"
+                        : connectionStatus.state === "connecting"
+                          ? "bg-amber-400 animate-pulse"
+                          : connectionStatus.state === "reconnecting"
+                            ? "bg-orange-400"
+                            : connectionStatus.state === "error"
+                              ? "bg-red-400"
+                              : "bg-slate-400"
+                    }`}
+                  ></div>
+                  <span
+                    className={`text-xs font-medium tracking-wide ${
+                      connectionStatus.state === "connected"
+                        ? "text-emerald-400"
+                        : connectionStatus.state === "connecting"
+                          ? "text-amber-400"
+                          : connectionStatus.state === "reconnecting"
+                            ? "text-orange-400"
+                            : connectionStatus.state === "error"
+                              ? "text-red-400"
+                              : "text-slate-400"
                     }`}
                   >
-                    <DocumentArrowUpIcon className="w-16 h-16 mx-auto text-white/40 mb-4" />
-                    <h3 className="text-xl font-semibold text-white mb-2">
-                      {selectedFile
-                        ? selectedFile.name
-                        : "Drop your audio file here"}
-                    </h3>
-                    <p className="text-white/60 mb-6">
-                      {connectionStatus.state !== "connected" ? (
-                        <span className="text-yellow-400">
-                          ⚠️ Not connected - Please wait for connection
-                        </span>
-                      ) : selectedFile ? (
-                        `${formatFileSize(selectedFile.size)} • ${createSTTConfigForFile(selectedFile).encoding} encoding • Ready to process`
-                      ) : (
-                        "Or click to browse files"
-                      )}
-                    </p>
+                    {connectionStatus.state === "connected"
+                      ? "Connected"
+                      : connectionStatus.state === "connecting"
+                        ? "Connecting"
+                        : connectionStatus.state === "reconnecting"
+                          ? "Reconnecting"
+                          : connectionStatus.state === "error"
+                            ? "Error"
+                            : "Disconnected"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </nav>
+      </header>
 
-                    <div className="flex justify-center space-x-3">
-                      <button
-                        onClick={() => {
-                          if (connectionStatus.state !== "connected") {
-                            showToast(
-                              "warning",
-                              "Not Connected to Fano",
-                              "Please wait for connection to be established before selecting files",
-                            );
-                            return;
-                          }
-                          fileInputRef.current?.click();
-                        }}
-                        className="btn-primary"
-                        disabled={
-                          isProcessing || connectionStatus.state !== "connected"
-                        }
-                      >
-                        {selectedFile ? "Change File" : "Select File"}
-                      </button>
+      <div className="pt-20 py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Header */}
 
-                      {selectedFile && (
-                        <>
-                          <button
-                            onClick={processUploadedFile}
-                            className="btn-secondary"
-                            disabled={
-                              isProcessing ||
-                              connectionStatus.state !== "connected"
+          {/* Main Content */}
+          <div className="grid lg:grid-cols-2 gap-8">
+            {/* Left Panel - Controls */}
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.4, duration: 0.6 }}
+              className="space-y-6"
+            >
+              {/* Tab Navigation */}
+              <div className="flex space-x-1 p-1 glass rounded-2xl">
+                <button
+                  onClick={() => setActiveTab("upload")}
+                  className={`flex-1 py-3 px-6 rounded-xl font-medium transition-all duration-300 ${
+                    activeTab === "upload"
+                      ? "bg-gradient-to-r from-primary-500 to-secondary-500 text-white shadow-lg"
+                      : "text-white/60 hover:text-white/80 hover:bg-white/5"
+                  }`}
+                >
+                  <DocumentArrowUpIcon className="w-5 h-5 inline mr-2" />
+                  Upload Audio
+                </button>
+                <button
+                  onClick={() => setActiveTab("record")}
+                  className={`flex-1 py-3 px-6 rounded-xl font-medium transition-all duration-300 ${
+                    activeTab === "record"
+                      ? "bg-gradient-to-r from-primary-500 to-secondary-500 text-white shadow-lg"
+                      : "text-white/60 hover:text-white/80 hover:bg-white/5"
+                  }`}
+                >
+                  <MicrophoneIcon className="w-5 h-5 inline mr-2" />
+                  Record Live
+                </button>
+              </div>
+
+              {/* Upload Tab */}
+              <AnimatePresence mode="wait">
+                {activeTab === "upload" && (
+                  <motion.div
+                    key="upload"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-6"
+                  >
+                    {/* File Drop Zone */}
+                    <div
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      className={`upload-area p-8 text-center transition-all duration-300 ${
+                        isDragOver ? "dragover" : ""
+                      } ${
+                        connectionStatus.state !== "connected"
+                          ? "opacity-50"
+                          : ""
+                      }`}
+                    >
+                      <DocumentArrowUpIcon className="w-16 h-16 mx-auto text-white/40 mb-4" />
+                      <h3 className="text-xl font-semibold text-white mb-2">
+                        {selectedFile
+                          ? selectedFile.name
+                          : "Drop your audio file here"}
+                      </h3>
+                      <p className="text-white/60 mb-6">
+                        {connectionStatus.state !== "connected" ? (
+                          <span className="text-yellow-400">
+                            ⚠️ Not connected - Please wait for connection
+                          </span>
+                        ) : selectedFile ? (
+                          `${formatFileSize(selectedFile.size)} • ${createSTTConfigForFile(selectedFile).encoding} encoding • Ready to process`
+                        ) : (
+                          "Or click to browse files"
+                        )}
+                      </p>
+
+                      <div className="flex justify-center space-x-3">
+                        <button
+                          onClick={() => {
+                            if (connectionStatus.state !== "connected") {
+                              showToast(
+                                "warning",
+                                "Not Connected to Fano",
+                                "Please wait for connection to be established before selecting files",
+                              );
+                              return;
                             }
-                          >
-                            {isProcessing ? (
-                              uploadProgress === 0 ? (
-                                <>
-                                  <span className="loading-dots">
-                                    <span></span>
-                                    <span></span>
-                                    <span></span>
-                                  </span>
-                                  <span className="ml-2">Sending Audio...</span>
-                                </>
-                              ) : uploadProgress === 100 ? (
-                                <>
-                                  <span className="loading-dots">
-                                    <span></span>
-                                    <span></span>
-                                    <span></span>
-                                  </span>
-                                  <span className="ml-2">
-                                    Processing Transcription...
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="loading-dots">
-                                    <span></span>
-                                    <span></span>
-                                    <span></span>
-                                  </span>
-                                  <span className="ml-2">
-                                    Aggregating Results...
-                                  </span>
-                                </>
-                              )
-                            ) : (
-                              "Process File"
-                            )}
-                          </button>
+                            fileInputRef.current?.click();
+                          }}
+                          className="btn-primary"
+                          disabled={
+                            isProcessing ||
+                            connectionStatus.state !== "connected"
+                          }
+                        >
+                          {selectedFile ? "Change File" : "Select File"}
+                        </button>
 
-                          <button
-                            onClick={() => setSelectedFile(null)}
-                            className="p-3 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors"
-                          >
-                            <TrashIcon className="w-5 h-5" />
-                          </button>
-                        </>
+                        {selectedFile && (
+                          <>
+                            <button
+                              onClick={processUploadedFile}
+                              className="btn-secondary"
+                              disabled={
+                                isProcessing ||
+                                connectionStatus.state !== "connected"
+                              }
+                            >
+                              {isProcessing ? (
+                                uploadProgress === 0 ? (
+                                  <>
+                                    <span className="loading-dots">
+                                      <span></span>
+                                      <span></span>
+                                      <span></span>
+                                    </span>
+                                    <span className="ml-2">
+                                      Sending Audio...
+                                    </span>
+                                  </>
+                                ) : uploadProgress === 100 ? (
+                                  <>
+                                    <span className="loading-dots">
+                                      <span></span>
+                                      <span></span>
+                                      <span></span>
+                                    </span>
+                                    <span className="ml-2">
+                                      Processing Transcription...
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="loading-dots">
+                                      <span></span>
+                                      <span></span>
+                                      <span></span>
+                                    </span>
+                                    <span className="ml-2">
+                                      Aggregating Results...
+                                    </span>
+                                  </>
+                                )
+                              ) : (
+                                "Process File"
+                              )}
+                            </button>
+
+                            <button
+                              onClick={() => setSelectedFile(null)}
+                              className="p-3 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg transition-colors"
+                            >
+                              <TrashIcon className="w-5 h-5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+
+                      {isProcessing && uploadProgress > 0 && (
+                        <div className="mt-6">
+                          <div className="progress-bar">
+                            <div
+                              className="bg-gradient-to-r from-primary-500 to-secondary-500 h-full rounded-lg transition-all duration-300"
+                              style={{ width: `${uploadProgress}%` }}
+                            />
+                          </div>
+                          <p className="text-sm text-white/60 mt-2">
+                            {uploadProgress}% processed
+                          </p>
+                        </div>
                       )}
                     </div>
 
-                    {isProcessing && uploadProgress > 0 && (
-                      <div className="mt-6">
-                        <div className="progress-bar">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={SUPPORTED_AUDIO_FORMATS.join(",")}
+                      onChange={(e) =>
+                        e.target.files?.[0] &&
+                        handleFileSelect(e.target.files[0])
+                      }
+                      className="hidden"
+                    />
+
+                    {/* Supported Formats */}
+                    <div className="text-center">
+                      <p className="text-sm text-white/40 mb-2">
+                        Supported formats:
+                      </p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {["WAV", "MP3", "OGG", "FLAC", "M4A", "AAC"].map(
+                          (format) => (
+                            <span
+                              key={format}
+                              className="px-2 py-1 bg-white/5 rounded text-xs text-white/60"
+                            >
+                              {format}
+                            </span>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Record Tab */}
+                {activeTab === "record" && (
+                  <motion.div
+                    key="record"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-6"
+                  >
+                    {/* Recording Control Center */}
+                    <div className="glass rounded-2xl p-6">
+                      <div className="text-center mb-6">
+                        <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-center gap-2">
+                          <MicrophoneIcon className="w-5 h-5" />
+                          Recording Control Center
+                        </h3>
+
+                        {/* Status Indicator */}
+                        <div className="flex items-center justify-center space-x-3 mb-4">
                           <div
-                            className="bg-gradient-to-r from-primary-500 to-secondary-500 h-full rounded-lg transition-all duration-300"
-                            style={{ width: `${uploadProgress}%` }}
-                          />
+                            className={`w-4 h-4 rounded-full flex items-center justify-center ${
+                              micPermission === "granted"
+                                ? "bg-green-500 shadow-green-500/50 shadow-lg"
+                                : micPermission === "denied"
+                                  ? "bg-red-500 shadow-red-500/50 shadow-lg"
+                                  : micPermission === "checking"
+                                    ? "bg-yellow-500 animate-pulse shadow-yellow-500/50 shadow-lg"
+                                    : "bg-gray-500"
+                            }`}
+                          >
+                            {micPermission === "granted" && (
+                              <CheckCircleIcon className="w-2.5 h-2.5 text-white" />
+                            )}
+                            {micPermission === "denied" && (
+                              <XCircleIcon className="w-2.5 h-2.5 text-white" />
+                            )}
+                          </div>
+                          <span className="text-base font-medium text-white">
+                            {micPermission === "granted"
+                              ? "✓ Microphone Ready"
+                              : micPermission === "denied"
+                                ? "✗ Access Blocked"
+                                : micPermission === "checking"
+                                  ? "⏳ Requesting Access..."
+                                  : "⚡ Permission Required"}
+                          </span>
                         </div>
-                        <p className="text-sm text-white/60 mt-2">
-                          {uploadProgress}% processed
+
+                        {/* Permission Status Details */}
+                        {micPermission === "granted" && (
+                          <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mb-4">
+                            <p className="text-sm text-green-400 font-medium mb-1">
+                              🎙️ Microphone Access Granted
+                            </p>
+                            <p className="text-xs text-green-300/80">
+                              You can now start live recording. Your audio will
+                              be processed in real-time.
+                            </p>
+                          </div>
+                        )}
+
+                        {micPermission === "denied" && (
+                          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4 space-y-4">
+                            <div className="text-left">
+                              <p className="text-sm text-red-400 font-medium mb-2">
+                                🚫 Microphone Access Blocked
+                              </p>
+                              <p className="text-xs text-red-300/80 mb-3">
+                                To use live recording, please enable microphone
+                                access:
+                              </p>
+                            </div>
+
+                            <button
+                              onClick={requestMicrophonePermission}
+                              className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-blue-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                            >
+                              <MicrophoneIcon className="w-4 h-4" />
+                              Try Again
+                            </button>
+
+                            <div className="text-left bg-gray-900/30 rounded-lg p-3 space-y-2">
+                              <p className="text-xs text-gray-300 font-medium">
+                                Manual Setup Instructions:
+                              </p>
+                              <div className="text-xs text-gray-400 space-y-1">
+                                <p>
+                                  • Chrome: Click 🔒 or 🎙️ icon in address bar
+                                </p>
+                                <p>
+                                  • Firefox: Click 🔒 icon, then "Permissions"
+                                </p>
+                                <p>
+                                  • Safari: Safari menu → Settings → Websites →
+                                  Microphone
+                                </p>
+                                <p>• Edge: Click 🔒 icon next to the URL</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {micPermission === "prompt" && (
+                          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 mb-4 space-y-3">
+                            <div className="text-center">
+                              <p className="text-sm text-yellow-400 font-medium mb-2">
+                                🎤 Enable Microphone Access
+                              </p>
+                              <p className="text-xs text-yellow-300/80 mb-4">
+                                Click the button below and allow microphone
+                                access when prompted by your browser.
+                              </p>
+                            </div>
+
+                            <button
+                              onClick={requestMicrophonePermission}
+                              className="w-full px-4 py-2.5 bg-gradient-to-r from-green-500 to-green-600 text-white text-sm font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-green-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                            >
+                              <MicrophoneIcon className="w-4 h-4" />
+                              Enable Microphone
+                            </button>
+                          </div>
+                        )}
+
+                        {micPermission === "checking" && (
+                          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-4">
+                            <div className="flex items-center justify-center gap-2 mb-2">
+                              <div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                              <p className="text-sm text-yellow-400 font-medium">
+                                Requesting Permission...
+                              </p>
+                            </div>
+                            <p className="text-xs text-yellow-300/80">
+                              Please respond to your browser's permission prompt
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Recording Controls */}
+                        <div className="flex justify-center space-x-4 mb-6">
+                          {!isRecording ? (
+                            <button
+                              onClick={() => {
+                                if (
+                                  micPermission === "denied" ||
+                                  micPermission === "prompt"
+                                ) {
+                                  setShowMicModal(true);
+                                } else if (
+                                  connectionStatus.state === "connected"
+                                ) {
+                                  handleStartRecording();
+                                }
+                              }}
+                              className="relative group"
+                              disabled={connectionStatus.state !== "connected"}
+                            >
+                              <div
+                                className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 group-hover:scale-105 ${
+                                  connectionStatus.state !== "connected"
+                                    ? "bg-gray-500 cursor-not-allowed"
+                                    : micPermission === "denied" ||
+                                        micPermission === "prompt"
+                                      ? "bg-orange-500 hover:bg-orange-600 cursor-pointer"
+                                      : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
+                                }`}
+                              >
+                                <MicrophoneIconSolid className="w-8 h-8 text-white" />
+                              </div>
+                              {connectionStatus.state === "connected" &&
+                                micPermission !== "denied" && (
+                                  <div className="absolute -inset-2 bg-red-500/20 rounded-full opacity-0 group-hover:opacity-100 animate-ping"></div>
+                                )}
+                            </button>
+                          ) : (
+                            <div className="flex items-center space-x-4">
+                              {/* Pause/Resume Button */}
+                              <button
+                                onClick={
+                                  isPaused
+                                    ? handleResumeRecording
+                                    : handlePauseRecording
+                                }
+                                className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-blue-500 to-blue-600 hover:shadow-blue-500/30 hover:shadow-xl"
+                              >
+                                {isPaused ? (
+                                  <PlayIcon className="w-6 h-6 text-white ml-1" />
+                                ) : (
+                                  <PauseIconSolid className="w-5 h-5 text-white" />
+                                )}
+                              </button>
+
+                              {/* Stop Button */}
+                              <button
+                                onClick={handleStopRecording}
+                                className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-gray-600 to-gray-700 hover:shadow-gray-500/30 hover:shadow-xl"
+                              >
+                                <StopIcon className="w-5 h-5 text-white" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="text-center mb-6">
+                          <p className="text-sm text-white/60">
+                            {!isRecording
+                              ? micPermission === "denied"
+                                ? "🎙️ Click to enable microphone access"
+                                : micPermission === "prompt"
+                                  ? "🎤 Click to request microphone permission"
+                                  : micPermission === "checking"
+                                    ? "⏳ Requesting microphone access..."
+                                    : connectionStatus.state === "connected"
+                                      ? "🎙️ Click to start live recording"
+                                      : "🔌 Connecting to FANO STT..."
+                              : isPaused
+                                ? "⏸️ Recording paused - click to resume"
+                                : "🔴 Recording in progress..."}
+                          </p>
+                          {isRecording && (
+                            <div className="mt-2 text-xs text-white/40">
+                              Duration: {formatDuration(recordingTime)}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Audio Visualization */}
+                        <div className="border-t border-white/10 pt-6">
+                          <h4 className="text-md font-semibold text-white mb-4">
+                            Audio Visualization
+                          </h4>
+                          {isRecording && (
+                            <div className="space-y-2 mb-4">
+                              <div className="space-y-1">
+                                <p className="text-sm text-white/60">
+                                  Level:{" "}
+                                  {Math.round(
+                                    (manualAudioLevel !== null
+                                      ? manualAudioLevel
+                                      : audioLevel || 0) * 100,
+                                  )}
+                                  % • {formatDuration(recordingTime)}
+                                  {manualAudioLevel !== null && (
+                                    <span className="text-blue-400 ml-1">
+                                      (Manual)
+                                    </span>
+                                  )}
+                                </p>
+                                <div className="flex items-center justify-center space-x-4 text-xs">
+                                  <span className="text-white/40">
+                                    Data: {audioData ? "✓" : "✗"}
+                                  </span>
+                                  <span className="text-white/40">
+                                    Quality: {audioQuality}
+                                  </span>
+                                  <button
+                                    onClick={testAudioVisualization}
+                                    className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-white/60 hover:text-white/80 transition-colors"
+                                  >
+                                    Debug
+                                  </button>
+                                  <button
+                                    onClick={testManualAudioLevel}
+                                    className="px-2 py-1 bg-blue-500/20 hover:bg-blue-500/30 rounded text-blue-400/60 hover:text-blue-400/80 transition-colors"
+                                  >
+                                    Test Level
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-center space-x-2">
+                                <div
+                                  className={`w-2 h-2 rounded-full ${
+                                    audioQuality === "excellent"
+                                      ? "bg-green-500"
+                                      : audioQuality === "good"
+                                        ? "bg-blue-500"
+                                        : audioQuality === "fair"
+                                          ? "bg-yellow-500"
+                                          : "bg-red-500"
+                                  }`}
+                                ></div>
+                                <span className="text-xs text-white/60 capitalize">
+                                  {audioQuality} Quality
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                          {renderAudioVisualizer()}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Streaming Status */}
+                    {isRecording && (
+                      <div className="glass rounded-2xl p-6">
+                        <div className="text-center mb-4">
+                          <h3 className="text-lg font-semibold text-white mb-2">
+                            Streaming Status
+                          </h3>
+                          {isRecovering && (
+                            <div className="mb-4 p-3 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
+                              <div className="flex items-center justify-center space-x-2">
+                                <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
+                                <span className="text-sm text-yellow-200">
+                                  Recovering Connection... (Attempt{" "}
+                                  {recoveryAttempts}/5)
+                                </span>
+                              </div>
+                              {pendingChunks.length > 0 && (
+                                <div className="text-xs text-yellow-300 mt-1">
+                                  {pendingChunks.length} chunks buffered
+                                </div>
+                              )}
+                              {bufferedTranscripts.length > 0 && (
+                                <div className="text-xs text-yellow-300 mt-1">
+                                  {bufferedTranscripts.length} transcripts
+                                  preserved
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="text-center">
+                              <div className="text-2xl font-bold text-blue-400">
+                                {chunksStreamed}
+                              </div>
+                              <div className="text-xs text-white/60">
+                                Chunks Sent
+                              </div>
+                            </div>
+                            <div className="text-center">
+                              <div className="text-2xl font-bold text-green-400">
+                                {streamingRate.toFixed(1)}
+                              </div>
+                              <div className="text-xs text-white/60">
+                                Chunks/sec
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-4 flex items-center justify-center space-x-2">
+                            <div
+                              className={`w-2 h-2 rounded-full ${
+                                isRecovering
+                                  ? "bg-yellow-500 animate-pulse"
+                                  : connectionStatus.state === "connected"
+                                    ? "bg-green-500 animate-pulse"
+                                    : "bg-red-500"
+                              }`}
+                            ></div>
+                            <span className="text-sm text-white/80">
+                              {isRecovering
+                                ? "Reconnecting to FANO"
+                                : connectionStatus.state === "connected"
+                                  ? "Live Streaming to FANO"
+                                  : "Connection Lost"}
+                            </span>
+                            <div className="text-xs text-white/60">
+                              ({(bytesStreamed / 1024).toFixed(1)}KB sent)
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+
+            {/* Right Panel - Transcript */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.6, duration: 0.6 }}
+              className="space-y-6"
+            >
+              <div
+                ref={transcriptContainerRef}
+                className="transcript-container h-96 overflow-y-auto scroll-mt-20"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-white">
+                    Live Transcript
+                  </h3>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => {
+                        const text = finalTranscript + interimTranscript;
+                        navigator.clipboard.writeText(text);
+                        showToast(
+                          "success",
+                          "Copied",
+                          "Transcript copied to clipboard",
+                        );
+                      }}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                      disabled={!finalTranscript && !interimTranscript}
+                    >
+                      <DocumentDuplicateIcon className="w-4 h-4 text-white/60" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setTranscripts([]);
+                        setFinalTranscript("");
+                        setInterimTranscript("");
+                      }}
+                      className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                    >
+                      <TrashIcon className="w-4 h-4 text-white/60" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {finalTranscript && (
+                    <div className="p-3 bg-white/5 rounded-lg border-l-4 border-green-400">
+                      <p className="text-white leading-relaxed">
+                        {finalTranscript}
+                      </p>
+                    </div>
+                  )}
+
+                  {interimTranscript && (
+                    <div className="p-3 bg-white/5 rounded-lg border-l-4 border-yellow-400 opacity-70">
+                      <p className="text-white/80 leading-relaxed italic">
+                        {interimTranscript}
+                      </p>
+                      <p className="text-xs text-white/40 mt-1">
+                        Interim result...
+                      </p>
+                    </div>
+                  )}
+
+                  {transcripts.length === 0 &&
+                    !finalTranscript &&
+                    !interimTranscript && (
+                      <div className="text-center py-12">
+                        <SpeakerWaveIcon className="w-12 h-12 mx-auto text-white/30 mb-4" />
+                        <p className="text-white/40">
+                          {activeTab === "upload"
+                            ? "Upload an audio file to see transcription results"
+                            : "Start recording to see live transcription"}
                         </p>
                       </div>
                     )}
-                  </div>
 
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept={SUPPORTED_AUDIO_FORMATS.join(",")}
-                    onChange={(e) =>
-                      e.target.files?.[0] && handleFileSelect(e.target.files[0])
-                    }
-                    className="hidden"
-                  />
-
-                  {/* Supported Formats */}
-                  <div className="text-center">
-                    <p className="text-sm text-white/40 mb-2">
-                      Supported formats:
-                    </p>
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {["WAV", "MP3", "OGG", "FLAC", "M4A", "AAC"].map(
-                        (format) => (
-                          <span
-                            key={format}
-                            className="px-2 py-1 bg-white/5 rounded text-xs text-white/60"
-                          >
-                            {format}
-                          </span>
-                        ),
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Record Tab */}
-              {activeTab === "record" && (
-                <motion.div
-                  key="record"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  transition={{ duration: 0.3 }}
-                  className="space-y-6"
-                >
-                  {/* Recording Control Center */}
-                  <div className="glass rounded-2xl p-6">
-                    <div className="text-center mb-6">
-                      <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-center gap-2">
-                        <MicrophoneIcon className="w-5 h-5" />
-                        Recording Control Center
-                      </h3>
-
-                      {/* Status Indicator */}
-                      <div className="flex items-center justify-center space-x-3 mb-4">
-                        <div
-                          className={`w-4 h-4 rounded-full flex items-center justify-center ${
-                            micPermission === "granted"
-                              ? "bg-green-500 shadow-green-500/50 shadow-lg"
-                              : micPermission === "denied"
-                                ? "bg-red-500 shadow-red-500/50 shadow-lg"
-                                : micPermission === "checking"
-                                  ? "bg-yellow-500 animate-pulse shadow-yellow-500/50 shadow-lg"
-                                  : "bg-gray-500"
-                          }`}
-                        >
-                          {micPermission === "granted" && (
-                            <CheckCircleIcon className="w-2.5 h-2.5 text-white" />
-                          )}
-                          {micPermission === "denied" && (
-                            <XCircleIcon className="w-2.5 h-2.5 text-white" />
-                          )}
-                        </div>
-                        <span className="text-base font-medium text-white">
-                          {micPermission === "granted"
-                            ? "✓ Microphone Ready"
-                            : micPermission === "denied"
-                              ? "✗ Access Blocked"
-                              : micPermission === "checking"
-                                ? "⏳ Requesting Access..."
-                                : "⚡ Permission Required"}
-                        </span>
-                      </div>
-
-                      {/* Permission Status Details */}
-                      {micPermission === "granted" && (
-                        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mb-4">
-                          <p className="text-sm text-green-400 font-medium mb-1">
-                            🎙️ Microphone Access Granted
-                          </p>
-                          <p className="text-xs text-green-300/80">
-                            You can now start live recording. Your audio will be
-                            processed in real-time.
-                          </p>
-                        </div>
-                      )}
-
-                      {micPermission === "denied" && (
-                        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4 space-y-4">
-                          <div className="text-left">
-                            <p className="text-sm text-red-400 font-medium mb-2">
-                              🚫 Microphone Access Blocked
-                            </p>
-                            <p className="text-xs text-red-300/80 mb-3">
-                              To use live recording, please enable microphone
-                              access:
-                            </p>
-                          </div>
-
-                          <button
-                            onClick={requestMicrophonePermission}
-                            className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-blue-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                          >
-                            <MicrophoneIcon className="w-4 h-4" />
-                            Try Again
-                          </button>
-
-                          <div className="text-left bg-gray-900/30 rounded-lg p-3 space-y-2">
-                            <p className="text-xs text-gray-300 font-medium">
-                              Manual Setup Instructions:
-                            </p>
-                            <div className="text-xs text-gray-400 space-y-1">
-                              <p>
-                                • Chrome: Click 🔒 or 🎙️ icon in address bar
-                              </p>
-                              <p>
-                                • Firefox: Click 🔒 icon, then "Permissions"
-                              </p>
-                              <p>
-                                • Safari: Safari menu → Settings → Websites →
-                                Microphone
-                              </p>
-                              <p>• Edge: Click 🔒 icon next to the URL</p>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {micPermission === "prompt" && (
-                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 mb-4 space-y-3">
-                          <div className="text-center">
-                            <p className="text-sm text-yellow-400 font-medium mb-2">
-                              🎤 Enable Microphone Access
-                            </p>
-                            <p className="text-xs text-yellow-300/80 mb-4">
-                              Click the button below and allow microphone access
-                              when prompted by your browser.
-                            </p>
-                          </div>
-
-                          <button
-                            onClick={requestMicrophonePermission}
-                            className="w-full px-4 py-2.5 bg-gradient-to-r from-green-500 to-green-600 text-white text-sm font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-green-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                          >
-                            <MicrophoneIcon className="w-4 h-4" />
-                            Enable Microphone
-                          </button>
-                        </div>
-                      )}
-
-                      {micPermission === "checking" && (
-                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-4">
-                          <div className="flex items-center justify-center gap-2 mb-2">
-                            <div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
-                            <p className="text-sm text-yellow-400 font-medium">
-                              Requesting Permission...
-                            </p>
-                          </div>
-                          <p className="text-xs text-yellow-300/80">
-                            Please respond to your browser's permission prompt
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Recording Controls */}
-                      <div className="flex justify-center space-x-4 mb-6">
-                        {!isRecording ? (
-                          <button
-                            onClick={() => {
-                              if (
-                                micPermission === "denied" ||
-                                micPermission === "prompt"
-                              ) {
-                                setShowMicModal(true);
-                              } else if (
-                                connectionStatus.state === "connected"
-                              ) {
-                                handleStartRecording();
-                              }
-                            }}
-                            className="relative group"
-                            disabled={connectionStatus.state !== "connected"}
-                          >
-                            <div
-                              className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 group-hover:scale-105 ${
-                                connectionStatus.state !== "connected"
-                                  ? "bg-gray-500 cursor-not-allowed"
-                                  : micPermission === "denied" ||
-                                      micPermission === "prompt"
-                                    ? "bg-orange-500 hover:bg-orange-600 cursor-pointer"
-                                    : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
-                              }`}
-                            >
-                              <MicrophoneIconSolid className="w-8 h-8 text-white" />
-                            </div>
-                            {connectionStatus.state === "connected" &&
-                              micPermission !== "denied" && (
-                                <div className="absolute -inset-2 bg-red-500/20 rounded-full opacity-0 group-hover:opacity-100 animate-ping"></div>
-                              )}
-                          </button>
-                        ) : (
-                          <div className="flex items-center space-x-4">
-                            {/* Pause/Resume Button */}
-                            <button
-                              onClick={
-                                isPaused
-                                  ? handleResumeRecording
-                                  : handlePauseRecording
-                              }
-                              className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-blue-500 to-blue-600 hover:shadow-blue-500/30 hover:shadow-xl"
-                            >
-                              {isPaused ? (
-                                <PlayIcon className="w-6 h-6 text-white ml-1" />
-                              ) : (
-                                <PauseIconSolid className="w-5 h-5 text-white" />
-                              )}
-                            </button>
-
-                            {/* Stop Button */}
-                            <button
-                              onClick={handleStopRecording}
-                              className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-gray-600 to-gray-700 hover:shadow-gray-500/30 hover:shadow-xl"
-                            >
-                              <StopIcon className="w-5 h-5 text-white" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="text-center mb-6">
-                        <p className="text-sm text-white/60">
-                          {!isRecording
-                            ? micPermission === "denied"
-                              ? "🎙️ Click to enable microphone access"
-                              : micPermission === "prompt"
-                                ? "🎤 Click to request microphone permission"
-                                : micPermission === "checking"
-                                  ? "⏳ Requesting microphone access..."
-                                  : connectionStatus.state === "connected"
-                                    ? "🎙️ Click to start live recording"
-                                    : "🔌 Connecting to FANO STT..."
-                            : isPaused
-                              ? "⏸️ Recording paused - click to resume"
-                              : "🔴 Recording in progress..."}
-                        </p>
-                        {isRecording && (
-                          <div className="mt-2 text-xs text-white/40">
-                            Duration: {formatDuration(recordingTime)}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Audio Visualization */}
-                      <div className="border-t border-white/10 pt-6">
-                        <h4 className="text-md font-semibold text-white mb-4">
-                          Audio Visualization
-                        </h4>
-                        {isRecording && (
-                          <div className="space-y-2 mb-4">
-                            <div className="space-y-1">
-                              <p className="text-sm text-white/60">
-                                Level:{" "}
-                                {Math.round(
-                                  (manualAudioLevel !== null
-                                    ? manualAudioLevel
-                                    : audioLevel || 0) * 100,
-                                )}
-                                % • {formatDuration(recordingTime)}
-                                {manualAudioLevel !== null && (
-                                  <span className="text-blue-400 ml-1">
-                                    (Manual)
-                                  </span>
-                                )}
-                              </p>
-                              <div className="flex items-center justify-center space-x-4 text-xs">
-                                <span className="text-white/40">
-                                  Data: {audioData ? "✓" : "✗"}
-                                </span>
-                                <span className="text-white/40">
-                                  Quality: {audioQuality}
-                                </span>
-                                <button
-                                  onClick={testAudioVisualization}
-                                  className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-white/60 hover:text-white/80 transition-colors"
-                                >
-                                  Debug
-                                </button>
-                                <button
-                                  onClick={testManualAudioLevel}
-                                  className="px-2 py-1 bg-blue-500/20 hover:bg-blue-500/30 rounded text-blue-400/60 hover:text-blue-400/80 transition-colors"
-                                >
-                                  Test Level
-                                </button>
-                              </div>
-                            </div>
-                            <div className="flex items-center justify-center space-x-2">
-                              <div
-                                className={`w-2 h-2 rounded-full ${
-                                  audioQuality === "excellent"
-                                    ? "bg-green-500"
-                                    : audioQuality === "good"
-                                      ? "bg-blue-500"
-                                      : audioQuality === "fair"
-                                        ? "bg-yellow-500"
-                                        : "bg-red-500"
-                                }`}
-                              ></div>
-                              <span className="text-xs text-white/60 capitalize">
-                                {audioQuality} Quality
-                              </span>
-                            </div>
-                          </div>
-                        )}
-                        {renderAudioVisualizer()}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Streaming Status */}
-                  {isRecording && (
-                    <div className="glass rounded-2xl p-6">
-                      <div className="text-center mb-4">
-                        <h3 className="text-lg font-semibold text-white mb-2">
-                          Streaming Status
-                        </h3>
-                        {isRecovering && (
-                          <div className="mb-4 p-3 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
-                            <div className="flex items-center justify-center space-x-2">
-                              <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
-                              <span className="text-sm text-yellow-200">
-                                Recovering Connection... (Attempt{" "}
-                                {recoveryAttempts}/5)
-                              </span>
-                            </div>
-                            {pendingChunks.length > 0 && (
-                              <div className="text-xs text-yellow-300 mt-1">
-                                {pendingChunks.length} chunks buffered
-                              </div>
-                            )}
-                            {bufferedTranscripts.length > 0 && (
-                              <div className="text-xs text-yellow-300 mt-1">
-                                {bufferedTranscripts.length} transcripts
-                                preserved
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="text-center">
-                            <div className="text-2xl font-bold text-blue-400">
-                              {chunksStreamed}
-                            </div>
-                            <div className="text-xs text-white/60">
-                              Chunks Sent
-                            </div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-2xl font-bold text-green-400">
-                              {streamingRate.toFixed(1)}
-                            </div>
-                            <div className="text-xs text-white/60">
-                              Chunks/sec
-                            </div>
-                          </div>
-                        </div>
-                        <div className="mt-4 flex items-center justify-center space-x-2">
-                          <div
-                            className={`w-2 h-2 rounded-full ${
-                              isRecovering
-                                ? "bg-yellow-500 animate-pulse"
-                                : connectionStatus.state === "connected"
-                                  ? "bg-green-500 animate-pulse"
-                                  : "bg-red-500"
-                            }`}
-                          ></div>
-                          <span className="text-sm text-white/80">
-                            {isRecovering
-                              ? "Reconnecting to FANO"
-                              : connectionStatus.state === "connected"
-                                ? "Live Streaming to FANO"
-                                : "Connection Lost"}
-                          </span>
-                          <div className="text-xs text-white/60">
-                            ({(bytesStreamed / 1024).toFixed(1)}KB sent)
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
-
-          {/* Right Panel - Transcript */}
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.6, duration: 0.6 }}
-            className="space-y-6"
-          >
-            <div
-              ref={transcriptContainerRef}
-              className="transcript-container h-96 overflow-y-auto scroll-mt-20"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-white">
-                  Live Transcript
-                </h3>
-                <div className="flex space-x-2">
-                  <button
-                    onClick={() => {
-                      const text = finalTranscript + interimTranscript;
-                      navigator.clipboard.writeText(text);
-                      showToast(
-                        "success",
-                        "Copied",
-                        "Transcript copied to clipboard",
-                      );
-                    }}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-                    disabled={!finalTranscript && !interimTranscript}
-                  >
-                    <DocumentDuplicateIcon className="w-4 h-4 text-white/60" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      setTranscripts([]);
-                      setFinalTranscript("");
-                      setInterimTranscript("");
-                    }}
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-                  >
-                    <TrashIcon className="w-4 h-4 text-white/60" />
-                  </button>
+                  <div ref={transcriptEndRef} />
                 </div>
               </div>
 
-              <div className="space-y-3">
-                {finalTranscript && (
-                  <div className="p-3 bg-white/5 rounded-lg border-l-4 border-green-400">
-                    <p className="text-white leading-relaxed">
-                      {finalTranscript}
-                    </p>
-                  </div>
-                )}
-
-                {interimTranscript && (
-                  <div className="p-3 bg-white/5 rounded-lg border-l-4 border-yellow-400 opacity-70">
-                    <p className="text-white/80 leading-relaxed italic">
-                      {interimTranscript}
-                    </p>
-                    <p className="text-xs text-white/40 mt-1">
-                      Interim result...
-                    </p>
-                  </div>
-                )}
-
-                {transcripts.length === 0 &&
-                  !finalTranscript &&
-                  !interimTranscript && (
-                    <div className="text-center py-12">
-                      <SpeakerWaveIcon className="w-12 h-12 mx-auto text-white/30 mb-4" />
-                      <p className="text-white/40">
-                        {activeTab === "upload"
-                          ? "Upload an audio file to see transcription results"
-                          : "Start recording to see live transcription"}
+              {/* Statistics */}
+              {(finalTranscript || transcripts.length > 0) && (
+                <div className="glass rounded-2xl p-4">
+                  <h4 className="text-sm font-semibold text-white/80 mb-3">
+                    Statistics
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-white/60">Words</p>
+                      <p className="text-white font-medium">
+                        {
+                          finalTranscript.split(" ").filter((w) => w.length > 0)
+                            .length
+                        }
                       </p>
                     </div>
-                  )}
-
-                <div ref={transcriptEndRef} />
-              </div>
-            </div>
-
-            {/* Statistics */}
-            {(finalTranscript || transcripts.length > 0) && (
-              <div className="glass rounded-2xl p-4">
-                <h4 className="text-sm font-semibold text-white/80 mb-3">
-                  Statistics
-                </h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-white/60">Words</p>
-                    <p className="text-white font-medium">
-                      {
-                        finalTranscript.split(" ").filter((w) => w.length > 0)
-                          .length
-                      }
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-white/60">Characters</p>
-                    <p className="text-white font-medium">
-                      {finalTranscript.length}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-white/60">Segments</p>
-                    <p className="text-white font-medium">
-                      {transcripts.length}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-white/60">Avg Confidence</p>
-                    <p className="text-white font-medium">
-                      {transcripts.length > 0
-                        ? Math.round(
-                            (transcripts.reduce(
-                              (sum, t) => sum + t.confidence,
-                              0,
-                            ) /
-                              transcripts.length) *
-                              100,
-                          )
-                        : 0}
-                      %
-                    </p>
+                    <div>
+                      <p className="text-white/60">Characters</p>
+                      <p className="text-white font-medium">
+                        {finalTranscript.length}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-white/60">Segments</p>
+                      <p className="text-white font-medium">
+                        {transcripts.length}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-white/60">Avg Confidence</p>
+                      <p className="text-white font-medium">
+                        {transcripts.length > 0
+                          ? Math.round(
+                              (transcripts.reduce(
+                                (sum, t) => sum + t.confidence,
+                                0,
+                              ) /
+                                transcripts.length) *
+                                100,
+                            )
+                          : 0}
+                        %
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </motion.div>
+              )}
+            </motion.div>
+          </div>
+        </div>
+
+        {/* Microphone Permission Modal */}
+        <AnimatePresence>
+          {showMicModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+              onClick={() => setShowMicModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-gradient-to-br from-gray-900 to-black border border-white/10 rounded-2xl shadow-2xl max-w-md w-full p-6"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-gradient-to-br from-red-500 to-orange-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <MicrophoneIcon className="w-8 h-8 text-white" />
+                  </div>
+
+                  <h3 className="text-xl font-bold text-white mb-2">
+                    Microphone Access Required
+                  </h3>
+
+                  <p className="text-gray-300 text-sm mb-6">
+                    To use live recording, please enable microphone access for
+                    this website.
+                  </p>
+
+                  {micPermission === "denied" && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4 text-left">
+                      <p className="text-red-400 text-sm font-medium mb-2">
+                        Manual Setup Required
+                      </p>
+                      <div className="text-xs text-red-300/80 space-y-1">
+                        <p>
+                          1. Click the 🔒 or 🎙️ icon in your browser's address
+                          bar
+                        </p>
+                        <p>2. Select "Allow" for microphone access</p>
+                        <p>3. Refresh the page if needed</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowMicModal(false)}
+                      className="flex-1 px-4 py-2 text-gray-400 hover:text-white transition-colors border border-gray-600 hover:border-gray-500 rounded-lg"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setShowMicModal(false);
+                        await requestMicrophonePermission();
+                      }}
+                      className="flex-1 px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all shadow-lg hover:shadow-green-500/30"
+                    >
+                      Enable Access
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Toast Notifications */}
+        <div className="fixed top-20 right-4 z-50 space-y-2">
+          <AnimatePresence>
+            {toasts.map((toast) => renderToast(toast))}
+          </AnimatePresence>
         </div>
       </div>
-
-      {/* Microphone Permission Modal */}
-      <AnimatePresence>
-        {showMicModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setShowMicModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-gradient-to-br from-gray-900 to-black border border-white/10 rounded-2xl shadow-2xl max-w-md w-full p-6"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="text-center">
-                <div className="w-16 h-16 bg-gradient-to-br from-red-500 to-orange-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <MicrophoneIcon className="w-8 h-8 text-white" />
-                </div>
-
-                <h3 className="text-xl font-bold text-white mb-2">
-                  Microphone Access Required
-                </h3>
-
-                <p className="text-gray-300 text-sm mb-6">
-                  To use live recording, please enable microphone access for
-                  this website.
-                </p>
-
-                {micPermission === "denied" && (
-                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4 text-left">
-                    <p className="text-red-400 text-sm font-medium mb-2">
-                      Manual Setup Required
-                    </p>
-                    <div className="text-xs text-red-300/80 space-y-1">
-                      <p>
-                        1. Click the 🔒 or 🎙️ icon in your browser's address bar
-                      </p>
-                      <p>2. Select "Allow" for microphone access</p>
-                      <p>3. Refresh the page if needed</p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowMicModal(false)}
-                    className="flex-1 px-4 py-2 text-gray-400 hover:text-white transition-colors border border-gray-600 hover:border-gray-500 rounded-lg"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={async () => {
-                      setShowMicModal(false);
-                      await requestMicrophonePermission();
-                    }}
-                    className="flex-1 px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all shadow-lg hover:shadow-green-500/30"
-                  >
-                    Enable Access
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Toast Notifications */}
-      <div className="fixed top-20 right-4 z-50 space-y-2">
-        <AnimatePresence>
-          {toasts.map((toast) => renderToast(toast))}
-        </AnimatePresence>
-      </div>
-    </div>
+    </>
   );
 }

@@ -1,7 +1,7 @@
 import React from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import type { Metadata } from "next";
-import NavigationHeaderWithConnection from "../components/NavigationHeaderWithConnection";
+
 import "./globals.css";
 
 const inter = Inter({
@@ -102,8 +102,7 @@ export default function RootLayout({
       <body className={`${inter.className} antialiased`}>
         <div className="relative min-h-screen flex flex-col">
           <BackgroundPattern />
-          <NavigationHeaderWithConnection />
-          <main className="flex-1 pt-20">
+          <main className="flex-1">
             <div className="relative z-10">{children}</div>
           </main>
           <FooterSection />
