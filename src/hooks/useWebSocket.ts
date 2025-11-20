@@ -116,8 +116,8 @@ export function useWebSocket({
       `[FANO] ${timestamp} - WebSocket connection opened successfully`,
     );
     console.log("[FANO] Connected via proxy with Authorization header");
-    console.log(`[FANO] Connection URL: ${url}`);
-    console.log(`[FANO] Auth token used: ${auth.token.substring(0, 50)}...`);
+    //console.log(`[FANO] Connection URL: ${url}`);
+    //console.log(`[FANO] Auth token used: ${auth.token.substring(0, 50)}...`);
 
     // Reset reconnection attempts on successful connection
     reconnectAttemptsRef.current = 0;
@@ -140,9 +140,9 @@ export function useWebSocket({
 
         console.log(`[FANO] ${timestamp} - Message received`);
         console.log("[FANO] Raw message data:", event.data);
-        console.log("[FANO] Parsed message:", message);
-        console.log("[FANO] Message type:", typeof message);
-        console.log("[FANO] Message keys:", Object.keys(message || {}));
+        //console.log("[FANO] Parsed message:", message);
+        // console.log("[FANO] Message type:", typeof message);
+        // console.log("[FANO] Message keys:", Object.keys(message || {}));
 
         // Check for specific error patterns
         if (message && typeof message === "object") {
@@ -156,7 +156,7 @@ export function useWebSocket({
             console.log(`[FANO] Response event type: ${message.event}`);
           }
           if ("data" in message) {
-            console.log(`[FANO] Response data:`, message.data);
+            //console.log(`[FANO] Response data:`, message.data);
           }
         }
 
@@ -214,12 +214,12 @@ export function useWebSocket({
 
   const createWebSocketConnection = useCallback(() => {
     const timestamp = new Date().toISOString();
-    console.log(`[FANO] ${timestamp} - createWebSocketConnection called`);
+    //console.log(`[FANO] ${timestamp} - createWebSocketConnection called`);
     console.log(`[FANO] Current WebSocket state:`, wsRef.current?.readyState);
-    console.log(
-      `[FANO] Auth token being used:`,
-      auth.token.substring(0, 50) + "...",
-    );
+    // console.log(
+    //   `[FANO] Auth token being used:`,
+    //   auth.token.substring(0, 50) + "...",
+    // );
 
     if (
       wsRef.current?.readyState === WebSocket.OPEN ||
@@ -248,13 +248,13 @@ export function useWebSocket({
 
       // Validate JWT token
       const tokenInfo = decodeJWT(auth.token);
-      console.log("[FANO] JWT Token Analysis:");
+      //console.log("[FANO] JWT Token Analysis:");
       if (tokenInfo.error) {
         console.error("[FANO] ❌ JWT Token Error:", tokenInfo.error);
       } else {
-        console.log("[FANO] ✅ JWT Token successfully decoded");
-        console.log("[FANO] Token Header:", tokenInfo.header);
-        console.log("[FANO] Token Payload:", tokenInfo.payload);
+        // console.log("[FANO] JWT Token successfully decoded");
+        // console.log("[FANO] Token Header:", tokenInfo.header);
+        // console.log("[FANO] Token Payload:", tokenInfo.payload);
         console.log("[FANO] Is Expired:", tokenInfo.isExpired);
         console.log("[FANO] Expires At:", tokenInfo.expiresAt?.toISOString());
         console.log("[FANO] Issued At:", tokenInfo.issuedAt?.toISOString());
@@ -268,13 +268,13 @@ export function useWebSocket({
         }
 
         if (tokenInfo.payload?.aud) {
-          console.log("[FANO] Token Audience:", tokenInfo.payload.aud);
+          //console.log("[FANO] Token Audience:", tokenInfo.payload.aud);
         }
         if (tokenInfo.payload?.sub) {
-          console.log("[FANO] Token Subject:", tokenInfo.payload.sub);
+          //console.log("[FANO] Token Subject:", tokenInfo.payload.sub);
         }
         if (tokenInfo.payload?.iss) {
-          console.log("[FANO] Token Issuer:", tokenInfo.payload.iss);
+          //console.log("[FANO] Token Issuer:", tokenInfo.payload.iss);
         }
       }
 
@@ -382,9 +382,9 @@ export function useWebSocket({
 
   const connect = useCallback(() => {
     const timestamp = new Date().toISOString();
-    console.log(`[FANO] ${timestamp} - connect() function called`);
+    //console.log(`[FANO] ${timestamp} - connect() function called`);
     console.log(`[FANO] Current connection state:`, connectionStatus.state);
-    console.log(`[FANO] WebSocket readyState:`, wsRef.current?.readyState);
+    //console.log(`[FANO] WebSocket readyState:`, wsRef.current?.readyState);
 
     if (
       wsRef.current?.readyState === WebSocket.OPEN ||
@@ -428,7 +428,7 @@ export function useWebSocket({
   const sendMessage = useCallback(
     (message: FanoSTTRequest) => {
       const timestamp = new Date().toISOString();
-      console.log(`[FANO] ${timestamp} - sendMessage called`);
+      //console.log(`[FANO] ${timestamp} - sendMessage called`);
       console.log("[FANO] Message to send:", message);
       console.log(
         `[FANO] WebSocket state: ${wsRef.current?.readyState} (${

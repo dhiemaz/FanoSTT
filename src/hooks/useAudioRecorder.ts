@@ -142,9 +142,9 @@ export function useAudioRecorder({
 
   // Send accumulated audio from interval buffer
   const sendIntervalAudio = useCallback(() => {
-    console.log(
-      `[INTERVAL AUDIO] sendIntervalAudio called - buffer has ${intervalAudioBufferRef.current.length} chunks`,
-    );
+    // console.log(
+    //   `[INTERVAL AUDIO] sendIntervalAudio called - buffer has ${intervalAudioBufferRef.current.length} chunks`,
+    // );
 
     if (intervalAudioBufferRef.current.length === 0) {
       console.log("[INTERVAL AUDIO] No audio data to send");
@@ -203,11 +203,11 @@ export function useAudioRecorder({
     lastIntervalTimeRef.current = Date.now();
 
     intervalTimerRef.current = setInterval(() => {
-      console.log(
-        `[INTERVAL TIMER] Timer fired - isRecording: ${isRecordingRef.current}, isPaused: ${isPausedRef.current}`,
-      );
+      // console.log(
+      //   `[INTERVAL TIMER] Timer fired - isRecording: ${isRecordingRef.current}, isPaused: ${isPausedRef.current}`,
+      // );
       if (isRecordingRef.current && !isPausedRef.current) {
-        console.log("[INTERVAL TIMER] Calling sendIntervalAudio()");
+        //console.log("[INTERVAL TIMER] Calling sendIntervalAudio()");
         sendIntervalAudioRef.current?.();
       } else {
         console.log(
@@ -219,9 +219,9 @@ export function useAudioRecorder({
     console.log(
       `[INTERVAL AUDIO] Timer set up for ${intervalDuration}s intervals`,
     );
-    console.log(
-      `[INTERVAL AUDIO] Timer ID: ${intervalTimerRef.current}, will fire every ${intervalDuration * 1000}ms`,
-    );
+    // console.log(
+    //   `[INTERVAL AUDIO] Timer ID: ${intervalTimerRef.current}, will fire every ${intervalDuration * 1000}ms`,
+    // );
   }, [intervalDuration]);
 
   // Cleanup interval timer
@@ -570,12 +570,12 @@ export function useAudioRecorder({
         analyser.maxDecibels = -20;
         analyserRef.current = analyser;
 
-        console.log("[AUDIO VIZ] Created analyser:", {
-          fftSize: analyser.fftSize,
-          frequencyBinCount: analyser.frequencyBinCount,
-          smoothingTimeConstant: analyser.smoothingTimeConstant,
-          sampleRate: audioContext.sampleRate,
-        });
+        // console.log("[AUDIO VIZ] Created analyser:", {
+        //   fftSize: analyser.fftSize,
+        //   frequencyBinCount: analyser.frequencyBinCount,
+        //   smoothingTimeConstant: analyser.smoothingTimeConstant,
+        //   sampleRate: audioContext.sampleRate,
+        // });
 
         // Connect source to analyser for visualization
         source.connect(analyser);
@@ -590,7 +590,7 @@ export function useAudioRecorder({
       );
       processorRef.current = processor;
 
-      console.log("[AUDIO INIT] Script processor created");
+      //console.log("[AUDIO INIT] Script processor created");
 
       processor.onaudioprocess = (event) => {
         // console.log("[AUDIO PROCESSOR] onaudioprocess called:", {

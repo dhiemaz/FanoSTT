@@ -19,8 +19,8 @@ import {
 import {
   MicrophoneIcon as MicrophoneIconSolid,
   PauseIcon as PauseIconSolid,
-  SpeakerXMarkIcon as SpeakerXMarkIconSolid,
 } from "@heroicons/react/24/solid";
+import { MicrophoneIcon as MicrophoneIconOutline } from "@heroicons/react/24/outline";
 
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
@@ -685,7 +685,7 @@ export default function HomePage() {
     onAudioChunk: handleAudioChunkPlaceholder,
     onIntervalAudio: handleIntervalAudio,
     onRecordingComplete: handleRecordingComplete,
-    intervalDuration: 2, // Send audio every 2 seconds
+    intervalDuration: 5, // Send audio every 5 seconds to match Fano's processing rhythm
     onError: (error) => {
       showToast("error", "Recording Error", error.message);
       if (
@@ -813,10 +813,10 @@ export default function HomePage() {
               console.log(
                 `[MAIN] Attempting connection after DEADLINE_EXCEEDED with delay ${delay}ms`,
               );
-              console.log(
-                `[MAIN] Current connection state:`,
-                connectionStatus.state,
-              );
+              // console.log(
+              //   `[MAIN] Current connection state:`,
+              //   connectionStatus.state,
+              // );
               connect();
             }, delay);
           } else {
@@ -1039,10 +1039,10 @@ export default function HomePage() {
           `[MAIN] processUploadedFile - Connection needed. Current state:`,
           connectionStatus.state,
         );
-        console.log(
-          `[MAIN] Auth token being used:`,
-          AUTH_TOKEN.substring(0, 50) + "...",
-        );
+        // console.log(
+        //   `[MAIN] Auth token being used:`,
+        //   AUTH_TOKEN.substring(0, 50) + "...",
+        // );
         showToast(
           "info",
           "Connecting",
@@ -1163,10 +1163,10 @@ export default function HomePage() {
 
       // Send EOF immediately - WebSocket is functional (receiving responses)
 
-      console.log(
-        "[FANO AUTH] Sending EOF message via authenticated connection:",
-        eofMessage,
-      );
+      // console.log(
+      //   "[FANO AUTH] Sending EOF message via authenticated connection:",
+      //   eofMessage,
+      // );
       console.log(
         "[FANO AUTH] File upload complete - now aggregating transcript responses...",
       );
@@ -1218,11 +1218,11 @@ export default function HomePage() {
       console.log(
         `[MAIN] handleStartRecording - Not connected, attempting to connect...`,
       );
-      console.log(`[MAIN] Current connection state:`, connectionStatus.state);
-      console.log(
-        `[MAIN] Auth token being used:`,
-        AUTH_TOKEN.substring(0, 50) + "...",
-      );
+      //console.log(`[MAIN] Current connection state:`, connectionStatus.state);
+      // console.log(
+      //   `[MAIN] Auth token being used:`,
+      //   AUTH_TOKEN.substring(0, 50) + "...",
+      // );
       showToast("info", "Connecting", "Establishing connection to Fano STT...");
 
       connect();
@@ -1246,10 +1246,10 @@ export default function HomePage() {
       },
     };
 
-    console.log(
-      "[FANO AUTH] Sending recording config (requires valid bearer token):",
-      configMessage,
-    );
+    // console.log(
+    //   "[FANO AUTH] Sending recording config (requires valid bearer token):",
+    //   configMessage,
+    // );
     console.log(
       "[FANO AUTH] Starting real-time transcription with authenticated connection",
     );
@@ -2135,7 +2135,12 @@ export default function HomePage() {
                                 {isPaused ? (
                                   <PlayIcon className="w-6 h-6 text-white ml-1" />
                                 ) : (
-                                  <SpeakerXMarkIconSolid className="w-5 h-5 text-white" />
+                                  <div className="relative">
+                                    <MicrophoneIconSolid className="w-5 h-5 text-white" />
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                      <div className="w-6 h-0.5 bg-red-500 rotate-45 rounded-full"></div>
+                                    </div>
+                                  </div>
                                 )}
                               </button>
 
