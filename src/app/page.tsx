@@ -70,7 +70,8 @@ export default function HomePage() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [hasActiveRequest, setHasActiveRequest] = useState(false);
   const [isSendingFile, setIsSendingFile] = useState(false);
-  // 5-second interval audio sending - no loading state needed
+  // 2-second interval audio sending - no loading state needed
+  const [eofSent, setEofSent] = useState(false);
 
   // Manual audio level for testing
   const [manualAudioLevel, setManualAudioLevel] = useState<number | null>(null);
@@ -344,6 +345,9 @@ export default function HomePage() {
       onDisconnect: () => {
         console.log("[FANO] Disconnected");
 
+        // Reset EOF flag on disconnect to allow fresh EOF sending on new connection
+        setEofSent(false);
+
         // If we had an active file sending request when disconnected, mark for retry
         if (isSendingFile && hasActiveRequest && lastRequest && !isRetrying) {
           console.log(
@@ -591,12 +595,12 @@ export default function HomePage() {
     }
   }, []);
 
-  // Handle interval audio sending (every 5 seconds during recording)
+  // Handle interval audio sending (every 2 seconds during recording)
   const handleIntervalAudio = useCallback(
     async (intervalAudio: Int16Array, duration: number) => {
       try {
         console.log(
-          `[FANO INTERVAL] Processing 5s audio segment: ${intervalAudio.length} samples, ${duration}ms`,
+          `[FANO LIVE STREAM] Processing 2s audio segment for live recording: ${intervalAudio.length} samples, ${duration}ms`,
         );
 
         if (connectionStatus.state === "connected") {
@@ -624,24 +628,24 @@ export default function HomePage() {
           };
 
           console.log(
-            `[FANO INTERVAL] Sending 5s audio segment (${base64Audio.length} chars base64)`,
+            `[FANO LIVE STREAM] Sending 2s audio segment (${base64Audio.length} chars base64)`,
           );
           setLastRequest(intervalAudioMessage);
           sendMessage(intervalAudioMessage);
 
-          showToast(
-            "info",
-            "Audio Segment Sent",
-            `📤 Sent 5s audio segment to FANO STT`,
-          );
+          // showToast(
+          //   "info",
+          //   "Audio Segment Sent",
+          //   `📤 Sent 2s audio segment to FANO STT`,
+          // );
         } else {
           console.warn(
-            "[FANO INTERVAL] Not connected, cannot send interval audio",
+            "[FANO LIVE STREAM] Not connected, cannot send interval audio",
           );
         }
       } catch (error) {
         console.error(
-          "[FANO INTERVAL] Failed to process interval audio:",
+          "[FANO LIVE STREAM] Failed to process interval audio:",
           error,
         );
       }
@@ -681,7 +685,7 @@ export default function HomePage() {
     onAudioChunk: handleAudioChunkPlaceholder,
     onIntervalAudio: handleIntervalAudio,
     onRecordingComplete: handleRecordingComplete,
-    intervalDuration: 5, // Send audio every 5 seconds
+    intervalDuration: 2, // Send audio every 2 seconds
     onError: (error) => {
       showToast("error", "Recording Error", error.message);
       if (
@@ -730,6 +734,23 @@ export default function HomePage() {
   // Audio chunk handler for real-time recording (defined after useAudioRecorder)
   const handleAudioChunk = useCallback(
     (chunk: any) => {
+      // Skip individual chunk sending during live recording
+      // Use only interval audio (2-second segments) for live streaming to prevent transcript gaps
+      if (isRecording) {
+        // Still update statistics for live recording feedback, but don't send individual chunks
+        // console.log(
+        //   "[FANO LIVE STREAM] Skipping individual chunk - using interval audio for live recording",
+        // );
+        setChunksStreamed((prev) => prev + 1);
+        const now = Date.now();
+        if (lastChunkTime) {
+          const timeDiff = now - lastChunkTime;
+          setStreamingRate(1000 / timeDiff);
+        }
+        setLastChunkTime(now);
+        return; // Exit early - interval audio will handle transmission
+      }
+
       const int16Data = new Int16Array(chunk.data);
       const base64Data = audioBufferToBase64(int16Data);
 
@@ -739,6 +760,10 @@ export default function HomePage() {
           audioContent: base64Data,
         },
       };
+
+      console.log(
+        "[FANO FILE UPLOAD] Sending individual audio chunk for file processing",
+      );
 
       if (connectionStatus.state === "connected") {
         try {
@@ -1239,6 +1264,9 @@ export default function HomePage() {
     setBufferedFinalTranscript("");
     setBufferedInterimTranscript("");
 
+    // Reset EOF flag for new recording session
+    setEofSent(false);
+
     // Reset scroll tracking for new recording
     hasScrolledToTranscriptRef.current = false;
 
@@ -1343,8 +1371,8 @@ export default function HomePage() {
     setBufferedFinalTranscript("");
     setBufferedInterimTranscript("");
 
-    // Send EOF immediately after stopping
-    if (connectionStatus.state === "connected") {
+    // Send EOF only once and only if connected and not already sent
+    if (connectionStatus.state === "connected" && !eofSent) {
       const eofMessage: FanoSTTRequest = {
         event: "request",
         data: "EOF",
@@ -1356,11 +1384,16 @@ export default function HomePage() {
       );
       setLastRequest(eofMessage);
       sendMessage(eofMessage);
+      setEofSent(true); // Mark EOF as sent to prevent duplicates
       // Let Fano server close the connection after processing EOF
+    } else if (eofSent) {
+      console.log("[FANO AUTH] EOF already sent, skipping duplicate");
+    } else {
+      console.log("[FANO AUTH] Not connected, cannot send EOF");
     }
 
     showToast("success", "Recording Stopped", "🔴 Transcription completed");
-  }, [stopRecording, connectionStatus.state, sendMessage, showToast]);
+  }, [stopRecording, connectionStatus.state, sendMessage, showToast, eofSent]);
 
   const handlePauseRecording = useCallback(() => {
     pauseRecording();
@@ -1462,10 +1495,10 @@ export default function HomePage() {
       !audioData.frequencyData ||
       audioData.frequencyData.length === 0
     ) {
-      console.log(
-        "[AUDIO VIZ] Using fallback visualization, audioLevel:",
-        currentLevel,
-      );
+      // console.log(
+      //   "[AUDIO VIZ] Using fallback visualization, audioLevel:",
+      //   currentLevel,
+      // );
 
       return (
         <div className="h-32 flex items-end justify-center space-x-0.5">
@@ -1924,133 +1957,139 @@ export default function HomePage() {
                     className="space-y-6"
                   >
                     {/* Recording Control Center */}
-                    <div className="glass rounded-2xl p-6">
-                      <div className="text-center mb-6">
-                        <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-center gap-2">
-                          <MicrophoneIcon className="w-5 h-5" />
-                          Recording Control Center
-                        </h3>
+                    <div className="glass rounded-2xl p-6 flex flex-col min-h-[480px]">
+                      <div className="flex flex-col h-full">
+                        {/* Header Section */}
+                        <div className="text-center mb-6">
+                          <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-center gap-2">
+                            <MicrophoneIcon className="w-5 h-5" />
+                            Recording Control Center
+                          </h3>
 
-                        {/* Status Indicator */}
-                        <div className="flex items-center justify-center space-x-3 mb-4">
-                          <div
-                            className={`w-4 h-4 rounded-full flex items-center justify-center ${
-                              micPermission === "granted"
-                                ? "bg-green-500 shadow-green-500/50 shadow-lg"
+                          {/* Status Indicator */}
+                          <div className="flex items-center justify-center space-x-3 mb-4">
+                            <div
+                              className={`w-4 h-4 rounded-full flex items-center justify-center ${
+                                micPermission === "granted"
+                                  ? "bg-green-500 shadow-green-500/50 shadow-lg"
+                                  : micPermission === "denied"
+                                    ? "bg-red-500 shadow-red-500/50 shadow-lg"
+                                    : micPermission === "checking"
+                                      ? "bg-yellow-500 animate-pulse shadow-yellow-500/50 shadow-lg"
+                                      : "bg-gray-500"
+                              }`}
+                            >
+                              {micPermission === "granted" && (
+                                <CheckCircleIcon className="w-2.5 h-2.5 text-white" />
+                              )}
+                              {micPermission === "denied" && (
+                                <XCircleIcon className="w-2.5 h-2.5 text-white" />
+                              )}
+                            </div>
+                            <span className="text-base font-medium text-white">
+                              {micPermission === "granted"
+                                ? "✓ Microphone Ready"
                                 : micPermission === "denied"
-                                  ? "bg-red-500 shadow-red-500/50 shadow-lg"
+                                  ? "✗ Access Blocked"
                                   : micPermission === "checking"
-                                    ? "bg-yellow-500 animate-pulse shadow-yellow-500/50 shadow-lg"
-                                    : "bg-gray-500"
-                            }`}
-                          >
-                            {micPermission === "granted" && (
-                              <CheckCircleIcon className="w-2.5 h-2.5 text-white" />
-                            )}
-                            {micPermission === "denied" && (
-                              <XCircleIcon className="w-2.5 h-2.5 text-white" />
-                            )}
+                                    ? "⏳ Requesting Access..."
+                                    : "⚡ Permission Required"}
+                            </span>
                           </div>
-                          <span className="text-base font-medium text-white">
-                            {micPermission === "granted"
-                              ? "✓ Microphone Ready"
-                              : micPermission === "denied"
-                                ? "✗ Access Blocked"
-                                : micPermission === "checking"
-                                  ? "⏳ Requesting Access..."
-                                  : "⚡ Permission Required"}
-                          </span>
                         </div>
 
                         {/* Permission Status Details */}
-                        {micPermission === "granted" && (
-                          <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mb-4">
-                            <p className="text-sm text-green-400 font-medium mb-1">
-                              🎙️ Microphone Access Granted
-                            </p>
-                            <p className="text-xs text-green-300/80">
-                              You can now start live recording. Your audio will
-                              be processed in real-time.
-                            </p>
-                          </div>
-                        )}
-
-                        {micPermission === "denied" && (
-                          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4 space-y-4">
-                            <div className="text-left">
-                              <p className="text-sm text-red-400 font-medium mb-2">
-                                🚫 Microphone Access Blocked
+                        <div className="flex-1 flex flex-col justify-center">
+                          {micPermission === "granted" && (
+                            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mb-4">
+                              <p className="text-sm text-green-400 font-medium mb-1">
+                                🎙️ Microphone Access Granted
                               </p>
-                              <p className="text-xs text-red-300/80 mb-3">
-                                To use live recording, please enable microphone
-                                access:
+                              <p className="text-xs text-green-300/80">
+                                You can now start live recording. Your audio
+                                will be processed in real-time.
                               </p>
                             </div>
+                          )}
 
-                            <button
-                              onClick={requestMicrophonePermission}
-                              className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-blue-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                            >
-                              <MicrophoneIcon className="w-4 h-4" />
-                              Try Again
-                            </button>
+                          {micPermission === "denied" && (
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-4 space-y-4">
+                              <div className="text-left">
+                                <p className="text-sm text-red-400 font-medium mb-2">
+                                  🚫 Microphone Access Blocked
+                                </p>
+                                <p className="text-xs text-red-300/80 mb-3">
+                                  To use live recording, please enable
+                                  microphone access:
+                                </p>
+                              </div>
 
-                            <div className="text-left bg-gray-900/30 rounded-lg p-3 space-y-2">
-                              <p className="text-xs text-gray-300 font-medium">
-                                Manual Setup Instructions:
-                              </p>
-                              <div className="text-xs text-gray-400 space-y-1">
-                                <p>
-                                  • Chrome: Click 🔒 or 🎙️ icon in address bar
+                              <button
+                                onClick={requestMicrophonePermission}
+                                className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-sm font-medium rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-blue-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                              >
+                                <MicrophoneIcon className="w-4 h-4" />
+                                Try Again
+                              </button>
+
+                              <div className="text-left bg-gray-900/30 rounded-lg p-3 space-y-2">
+                                <p className="text-xs text-gray-300 font-medium">
+                                  Manual Setup Instructions:
                                 </p>
-                                <p>
-                                  • Firefox: Click 🔒 icon, then "Permissions"
-                                </p>
-                                <p>
-                                  • Safari: Safari menu → Settings → Websites →
-                                  Microphone
-                                </p>
-                                <p>• Edge: Click 🔒 icon next to the URL</p>
+                                <div className="text-xs text-gray-400 space-y-1">
+                                  <p>
+                                    • Chrome: Click 🔒 or 🎙️ icon in address bar
+                                  </p>
+                                  <p>
+                                    • Firefox: Click 🔒 icon, then "Permissions"
+                                  </p>
+                                  <p>
+                                    • Safari: Safari menu → Settings → Websites
+                                    → Microphone
+                                  </p>
+                                  <p>• Edge: Click 🔒 icon next to the URL</p>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        )}
+                          )}
 
-                        {micPermission === "prompt" && (
-                          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 mb-4 space-y-3">
-                            <div className="text-center">
-                              <p className="text-sm text-yellow-400 font-medium mb-2">
-                                🎤 Enable Microphone Access
-                              </p>
-                              <p className="text-xs text-yellow-300/80 mb-4">
-                                Click the button below and allow microphone
-                                access when prompted by your browser.
+                          {micPermission === "prompt" && (
+                            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 mb-4 space-y-3">
+                              <div className="text-center">
+                                <p className="text-sm text-yellow-400 font-medium mb-2">
+                                  🎤 Enable Microphone Access
+                                </p>
+                                <p className="text-xs text-yellow-300/80 mb-4">
+                                  Click the button below and allow microphone
+                                  access when prompted by your browser.
+                                </p>
+                              </div>
+
+                              <button
+                                onClick={requestMicrophonePermission}
+                                className="w-full px-4 py-2.5 bg-gradient-to-r from-green-500 to-green-600 text-white text-sm font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-green-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
+                              >
+                                <MicrophoneIcon className="w-4 h-4" />
+                                Enable Microphone
+                              </button>
+                            </div>
+                          )}
+
+                          {micPermission === "checking" && (
+                            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-4">
+                              <div className="flex items-center justify-center gap-2 mb-2">
+                                <div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                                <p className="text-sm text-yellow-400 font-medium">
+                                  Requesting Permission...
+                                </p>
+                              </div>
+                              <p className="text-xs text-yellow-300/80">
+                                Please respond to your browser's permission
+                                prompt
                               </p>
                             </div>
-
-                            <button
-                              onClick={requestMicrophonePermission}
-                              className="w-full px-4 py-2.5 bg-gradient-to-r from-green-500 to-green-600 text-white text-sm font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-green-500/30 transform hover:scale-[1.02] flex items-center justify-center gap-2"
-                            >
-                              <MicrophoneIcon className="w-4 h-4" />
-                              Enable Microphone
-                            </button>
-                          </div>
-                        )}
-
-                        {micPermission === "checking" && (
-                          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-4">
-                            <div className="flex items-center justify-center gap-2 mb-2">
-                              <div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
-                              <p className="text-sm text-yellow-400 font-medium">
-                                Requesting Permission...
-                              </p>
-                            </div>
-                            <p className="text-xs text-yellow-300/80">
-                              Please respond to your browser's permission prompt
-                            </p>
-                          </div>
-                        )}
+                          )}
+                        </div>
 
                         {/* Recording Controls */}
                         <div className="flex justify-center space-x-4 mb-6">
@@ -2111,6 +2150,7 @@ export default function HomePage() {
                           )}
                         </div>
 
+                        {/* Status Text */}
                         <div className="text-center mb-6">
                           <p className="text-sm text-white/60">
                             {!isRecording
@@ -2133,7 +2173,7 @@ export default function HomePage() {
                         </div>
 
                         {/* Audio Visualization */}
-                        <div className="border-t border-white/10 pt-6">
+                        <div className="border-t border-white/10 pt-6 flex-1">
                           <h4 className="text-md font-semibold text-white mb-4">
                             Audio Visualization
                           </h4>
@@ -2197,78 +2237,6 @@ export default function HomePage() {
                         </div>
                       </div>
                     </div>
-
-                    {/* Streaming Status */}
-                    {isRecording && (
-                      <div className="glass rounded-2xl p-6">
-                        <div className="text-center mb-4">
-                          <h3 className="text-lg font-semibold text-white mb-2">
-                            Streaming Status
-                          </h3>
-                          {isRecovering && (
-                            <div className="mb-4 p-3 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
-                              <div className="flex items-center justify-center space-x-2">
-                                <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
-                                <span className="text-sm text-yellow-200">
-                                  Recovering Connection... (Attempt{" "}
-                                  {recoveryAttempts}/5)
-                                </span>
-                              </div>
-                              {pendingChunks.length > 0 && (
-                                <div className="text-xs text-yellow-300 mt-1">
-                                  {pendingChunks.length} chunks buffered
-                                </div>
-                              )}
-                              {bufferedTranscripts.length > 0 && (
-                                <div className="text-xs text-yellow-300 mt-1">
-                                  {bufferedTranscripts.length} transcripts
-                                  preserved
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="text-center">
-                              <div className="text-2xl font-bold text-blue-400">
-                                {chunksStreamed}
-                              </div>
-                              <div className="text-xs text-white/60">
-                                Chunks Sent
-                              </div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-2xl font-bold text-green-400">
-                                {streamingRate.toFixed(1)}
-                              </div>
-                              <div className="text-xs text-white/60">
-                                Chunks/sec
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mt-4 flex items-center justify-center space-x-2">
-                            <div
-                              className={`w-2 h-2 rounded-full ${
-                                isRecovering
-                                  ? "bg-yellow-500 animate-pulse"
-                                  : connectionStatus.state === "connected"
-                                    ? "bg-green-500 animate-pulse"
-                                    : "bg-red-500"
-                              }`}
-                            ></div>
-                            <span className="text-sm text-white/80">
-                              {isRecovering
-                                ? "Reconnecting to FANO"
-                                : connectionStatus.state === "connected"
-                                  ? "Live Streaming to FANO"
-                                  : "Connection Lost"}
-                            </span>
-                            <div className="text-xs text-white/60">
-                              ({(bytesStreamed / 1024).toFixed(1)}KB sent)
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -2279,7 +2247,7 @@ export default function HomePage() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.6, duration: 0.6 }}
-              className="space-y-6"
+              className="space-y-6 min-h-[480px] flex flex-col"
             >
               <div
                 ref={transcriptContainerRef}
@@ -2356,11 +2324,13 @@ export default function HomePage() {
               </div>
 
               {/* Statistics */}
-              {(finalTranscript || transcripts.length > 0) && (
-                <div className="glass rounded-2xl p-4">
-                  <h4 className="text-sm font-semibold text-white/80 mb-3">
-                    Statistics
-                  </h4>
+              <div
+                className={`glass rounded-2xl p-4 ${isRecording && activeTab === "record" ? "flex-1" : "flex-[2]"}`}
+              >
+                <h4 className="text-sm font-semibold text-white/80 mb-3">
+                  Statistics
+                </h4>
+                {finalTranscript || transcripts.length > 0 ? (
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <p className="text-white/60">Words</p>
@@ -2398,6 +2368,83 @@ export default function HomePage() {
                           : 0}
                         %
                       </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <div className="text-white/40 mb-2">📊</div>
+                    <p className="text-sm text-white/50">
+                      Statistics will appear after transcription
+                    </p>
+                    <p className="text-xs text-white/40 mt-1">
+                      Start recording or upload a file to see results
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Streaming Status */}
+              {isRecording && activeTab === "record" && (
+                <div className="glass rounded-2xl p-6 flex-1">
+                  <div className="text-center mb-4">
+                    <h3 className="text-lg font-semibold text-white mb-2">
+                      Streaming Status
+                    </h3>
+                    {isRecovering && (
+                      <div className="mb-4 p-3 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
+                        <div className="flex items-center justify-center space-x-2">
+                          <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
+                          <span className="text-sm text-yellow-200">
+                            Recovering Connection... (Attempt {recoveryAttempts}
+                            /5)
+                          </span>
+                        </div>
+                        {pendingChunks.length > 0 && (
+                          <div className="text-xs text-yellow-300 mt-1">
+                            {pendingChunks.length} chunks buffered
+                          </div>
+                        )}
+                        {bufferedTranscripts.length > 0 && (
+                          <div className="text-xs text-yellow-300 mt-1">
+                            {bufferedTranscripts.length} transcripts preserved
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-blue-400">
+                          {chunksStreamed}
+                        </div>
+                        <div className="text-xs text-white/60">Chunks Sent</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-green-400">
+                          {streamingRate.toFixed(1)}
+                        </div>
+                        <div className="text-xs text-white/60">Chunks/sec</div>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex items-center justify-center space-x-2">
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          isRecovering
+                            ? "bg-yellow-500 animate-pulse"
+                            : connectionStatus.state === "connected"
+                              ? "bg-green-500 animate-pulse"
+                              : "bg-red-500"
+                        }`}
+                      ></div>
+                      <span className="text-sm text-white/80">
+                        {isRecovering
+                          ? "Reconnecting to FANO"
+                          : connectionStatus.state === "connected"
+                            ? "Live Streaming to FANO"
+                            : "Connection Lost"}
+                      </span>
+                      <div className="text-xs text-white/60">
+                        ({(bytesStreamed / 1024).toFixed(1)}KB sent)
+                      </div>
                     </div>
                   </div>
                 </div>
