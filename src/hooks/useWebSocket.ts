@@ -160,12 +160,16 @@ export function useWebSocket({
         onDisconnect?.();
 
         // Attempt to reconnect unless manually closed
+        // DISABLED: Don't reconnect when FANO sends error response and closes connection
+        /*
         if (!isManuallyClosedRef.current && scheduleReconnectRef.current) {
           console.log("[FANO] Connection lost - initiating reconnection");
           scheduleReconnectRef.current();
         } else {
           console.log("[FANO] disconnect ");
         }
+        */
+        console.log("[FANO] disconnect - no reconnection attempt");
       };
     } catch (error) {
       console.error("❌ [FANO] Failed to create connection:", error);
@@ -189,6 +193,8 @@ export function useWebSocket({
   ]);
 
   // Create the reconnect function and store it in ref
+  // DISABLED: Commenting out entire reconnection logic
+  /*
   scheduleReconnectRef.current = useCallback(() => {
     if (isManuallyClosedRef.current) {
       console.log("🔌 [FANO] Skipping reconnect - manually disconnected");
@@ -229,6 +235,7 @@ export function useWebSocket({
       createWebSocketConnection();
     }, delay);
   }, [updateConnectionStatus, createWebSocketConnection]);
+  */
 
   const connect = useCallback(() => {
     if (

@@ -417,13 +417,28 @@ export default function HomePage() {
     }
   }, [connectionStatus.state, isRetrying, lastRequest, sendMessage]);
 
-  // Auto-connect on component mount
+  // Reset upload state when connection is lost during file upload
   useEffect(() => {
-    const timer = setTimeout(() => {
-      connect();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [connect]);
+    if (
+      connectionStatus.state === "disconnected" &&
+      (isProcessing || isSendingFile)
+    ) {
+      console.log(
+        "[FANO] Connection lost during upload - resetting upload state",
+      );
+      setIsProcessing(false);
+      setUploadProgress(0);
+      setIsSendingFile(false);
+      setHasActiveRequest(false);
+      showToast(
+        "error",
+        "Upload Interrupted",
+        "Connection lost during upload. Please try again.",
+      );
+    }
+  }, [connectionStatus.state, isProcessing, isSendingFile, showToast]);
+
+  // Connection will be established on demand (upload/record)
 
   // Scroll to top when page loads
   useEffect(() => {
@@ -670,6 +685,40 @@ export default function HomePage() {
     },
   });
 
+  // Reset recording state when connection is lost during recording
+  useEffect(() => {
+    if (connectionStatus.state === "disconnected" && isRecording) {
+      console.log(
+        "[FANO] Connection lost during recording - stopping recording",
+      );
+      stopRecording();
+      setIsRecovering(false);
+      setRecoveryAttempts(0);
+      setWasRecordingBeforeDisconnect(false);
+      setPendingChunks([]);
+      setBufferedTranscripts([]);
+      setBufferedFinalTranscript("");
+      setBufferedInterimTranscript("");
+      showToast(
+        "error",
+        "Recording Interrupted",
+        "Connection lost during recording. Recording has been stopped.",
+      );
+    }
+  }, [
+    connectionStatus.state,
+    isRecording,
+    stopRecording,
+    showToast,
+    setIsRecovering,
+    setRecoveryAttempts,
+    setWasRecordingBeforeDisconnect,
+    setPendingChunks,
+    setBufferedTranscripts,
+    setBufferedFinalTranscript,
+    setBufferedInterimTranscript,
+  ]);
+
   // Audio chunk handler for real-time recording (defined after useAudioRecorder)
   const handleAudioChunk = useCallback(
     (chunk: any) => {
@@ -879,16 +928,6 @@ export default function HomePage() {
   // File upload handlers
   const handleFileSelect = useCallback(
     (file: File) => {
-      // Check connection status before allowing file selection
-      if (connectionStatus.state !== "connected") {
-        showToast(
-          "warning",
-          "Not Connected to Fano",
-          "Please wait for connection to be established before selecting files",
-        );
-        return;
-      }
-
       if (!isValidAudioFormat(file)) {
         showToast(
           "error",
@@ -914,26 +953,13 @@ export default function HomePage() {
         `${file.name} (${formatFileSize(file.size)})`,
       );
     },
-    [showToast, connectionStatus.state],
+    [showToast],
   );
 
-  const handleDragOver = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-
-      if (connectionStatus.state !== "connected") {
-        showToast(
-          "warning",
-          "Not Connected to Fano",
-          "Please establish connection before uploading files",
-        );
-        return;
-      }
-
-      setIsDragOver(true);
-    },
-    [connectionStatus.state, showToast],
-  );
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -955,12 +981,8 @@ export default function HomePage() {
 
   // Process uploaded file
   const processUploadedFile = useCallback(async () => {
-    if (!selectedFile || connectionStatus.state !== "connected") {
-      showToast(
-        "warning",
-        "Cannot Upload File",
-        "Please wait for connection to Fano to be established before uploading files",
-      );
+    if (!selectedFile) {
+      showToast("error", "No File Selected", "Please select a file first");
       return;
     }
 
@@ -968,10 +990,48 @@ export default function HomePage() {
     setTranscripts([]);
     setFinalTranscript("");
     setUploadProgress(0);
-    setIsSendingFile(true); // Mark as sending file
+    setIsSendingFile(true);
 
     try {
-      // Send initial configuration with dynamic encoding based on file type
+      // Step 1: Establish connection to Fano with Auth
+      if (connectionStatus.state !== "connected") {
+        showToast(
+          "info",
+          "Connecting",
+          "Establishing connection to Fano STT...",
+        );
+        connect();
+
+        // Wait for connection with timeout
+        let attempts = 0;
+        const maxAttempts = 20; // 10 seconds timeout
+
+        while (attempts < maxAttempts) {
+          if ((connectionStatus.state as ConnectionState) === "connected")
+            break;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          attempts++;
+        }
+
+        if ((connectionStatus.state as ConnectionState) !== "connected") {
+          showToast(
+            "error",
+            "Connection Failed",
+            "Unable to establish connection to Fano STT. Please check your network.",
+          );
+          setIsProcessing(false);
+          setIsSendingFile(false);
+          return;
+        }
+      }
+
+      showToast(
+        "success",
+        "Connected",
+        "Connection established, processing file...",
+      );
+
+      // Step 2: Send initial configuration with dynamic encoding based on file type
       const dynamicConfig = createSTTConfigForFile(selectedFile);
       const configMessage: FanoSTTRequest = {
         event: "request",
@@ -1020,6 +1080,18 @@ export default function HomePage() {
         },
       };
 
+      // Check connection before sending audio data
+      if ((connectionStatus.state as ConnectionState) !== "connected") {
+        showToast(
+          "error",
+          "Connection Lost",
+          "Connection lost while preparing to send audio data. Please try again.",
+        );
+        setIsProcessing(false);
+        setIsSendingFile(false);
+        return;
+      }
+
       console.log(
         "[FANO] Sending complete audio file via authenticated connection",
       );
@@ -1043,6 +1115,18 @@ export default function HomePage() {
         data: "EOF",
       };
 
+      // Check connection before sending EOF
+      if ((connectionStatus.state as ConnectionState) !== "connected") {
+        showToast(
+          "error",
+          "Connection Lost",
+          "Connection lost before sending EOF. Upload may be incomplete.",
+        );
+        setIsProcessing(false);
+        setIsSendingFile(false);
+        return;
+      }
+
       console.log(
         "[FANO AUTH] Sending EOF message via authenticated connection:",
         eofMessage,
@@ -1053,6 +1137,10 @@ export default function HomePage() {
       setLastRequest(eofMessage);
       setHasActiveRequest(true);
       sendMessage(eofMessage);
+      // Add small delay before disconnecting to ensure EOF is sent
+      setTimeout(() => {
+        disconnect();
+      }, 200);
       // Don't show completion toast here - wait for EOF response
     } catch (error) {
       console.error("File processing error:", error);
@@ -1062,7 +1150,7 @@ export default function HomePage() {
     } finally {
       setUploadProgress(0);
     }
-  }, [selectedFile, connectionStatus.state, sendMessage, showToast]);
+  }, [selectedFile, connectionStatus.state, sendMessage, showToast, connect]);
 
   // Recording controls
   const handleStartRecording = useCallback(async () => {
@@ -1266,6 +1354,10 @@ export default function HomePage() {
       );
       setLastRequest(eofMessage);
       sendMessage(eofMessage);
+      // Add small delay before disconnecting to ensure EOF is sent
+      setTimeout(() => {
+        disconnect();
+      }, 200);
     }
 
     showToast("success", "Recording Stopped", "🔴 Transcription completed");
@@ -1693,10 +1785,6 @@ export default function HomePage() {
                       onDrop={handleDrop}
                       className={`upload-area p-8 text-center transition-all duration-300 ${
                         isDragOver ? "dragover" : ""
-                      } ${
-                        connectionStatus.state !== "connected"
-                          ? "opacity-50"
-                          : ""
                       }`}
                     >
                       <DocumentArrowUpIcon className="w-16 h-16 mx-auto text-white/40 mb-4" />
@@ -1706,35 +1794,18 @@ export default function HomePage() {
                           : "Drop your audio file here"}
                       </h3>
                       <p className="text-white/60 mb-6">
-                        {connectionStatus.state !== "connected" ? (
-                          <span className="text-yellow-400">
-                            ⚠️ Not connected - Please wait for connection
-                          </span>
-                        ) : selectedFile ? (
-                          `${formatFileSize(selectedFile.size)} • ${createSTTConfigForFile(selectedFile).encoding} encoding • Ready to process`
-                        ) : (
-                          "Or click to browse files"
-                        )}
+                        {selectedFile
+                          ? `${formatFileSize(selectedFile.size)} • ${createSTTConfigForFile(selectedFile).encoding} encoding • Ready to process`
+                          : "Or click to browse files"}
                       </p>
 
                       <div className="flex justify-center space-x-3">
                         <button
                           onClick={() => {
-                            if (connectionStatus.state !== "connected") {
-                              showToast(
-                                "warning",
-                                "Not Connected to Fano",
-                                "Please wait for connection to be established before selecting files",
-                              );
-                              return;
-                            }
                             fileInputRef.current?.click();
                           }}
                           className="btn-primary"
-                          disabled={
-                            isProcessing ||
-                            connectionStatus.state !== "connected"
-                          }
+                          disabled={isProcessing}
                         >
                           {selectedFile ? "Change File" : "Select File"}
                         </button>
@@ -1744,10 +1815,7 @@ export default function HomePage() {
                             <button
                               onClick={processUploadedFile}
                               className="btn-secondary"
-                              disabled={
-                                isProcessing ||
-                                connectionStatus.state !== "connected"
-                              }
+                              disabled={isProcessing}
                             >
                               {isProcessing ? (
                                 uploadProgress === 0 ? (
@@ -1995,31 +2063,25 @@ export default function HomePage() {
                                   micPermission === "prompt"
                                 ) {
                                   setShowMicModal(true);
-                                } else if (
-                                  connectionStatus.state === "connected"
-                                ) {
+                                } else {
                                   handleStartRecording();
                                 }
                               }}
                               className="relative group"
-                              disabled={connectionStatus.state !== "connected"}
                             >
                               <div
                                 className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 group-hover:scale-105 ${
-                                  connectionStatus.state !== "connected"
-                                    ? "bg-gray-500 cursor-not-allowed"
-                                    : micPermission === "denied" ||
-                                        micPermission === "prompt"
-                                      ? "bg-orange-500 hover:bg-orange-600 cursor-pointer"
-                                      : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
+                                  micPermission === "denied" ||
+                                  micPermission === "prompt"
+                                    ? "bg-orange-500 hover:bg-orange-600 cursor-pointer"
+                                    : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
                                 }`}
                               >
                                 <MicrophoneIconSolid className="w-8 h-8 text-white" />
                               </div>
-                              {connectionStatus.state === "connected" &&
-                                micPermission !== "denied" && (
-                                  <div className="absolute -inset-2 bg-red-500/20 rounded-full opacity-0 group-hover:opacity-100 animate-ping"></div>
-                                )}
+                              {micPermission !== "denied" && (
+                                <div className="absolute -inset-2 bg-red-500/20 rounded-full opacity-0 group-hover:opacity-100 animate-ping"></div>
+                              )}
                             </button>
                           ) : (
                             <div className="flex items-center space-x-4">
@@ -2059,9 +2121,7 @@ export default function HomePage() {
                                   ? "🎤 Click to request microphone permission"
                                   : micPermission === "checking"
                                     ? "⏳ Requesting microphone access..."
-                                    : connectionStatus.state === "connected"
-                                      ? "🎙️ Click to start live recording"
-                                      : "🔌 Connecting to FANO STT..."
+                                    : "🎙️ Click to start live recording"
                               : isPaused
                                 ? "⏸️ Recording paused - click to resume"
                                 : "🔴 Recording in progress..."}
