@@ -873,6 +873,16 @@ export default function HomePage() {
   // File upload handlers
   const handleFileSelect = useCallback(
     (file: File) => {
+      // Check connection status before allowing file selection
+      if (connectionStatus.state !== "connected") {
+        showToast(
+          "warning",
+          "Not Connected to Fano",
+          "Please wait for connection to be established before selecting files",
+        );
+        return;
+      }
+
       if (!isValidAudioFormat(file)) {
         showToast(
           "error",
@@ -898,13 +908,26 @@ export default function HomePage() {
         `${file.name} (${formatFileSize(file.size)})`,
       );
     },
-    [showToast],
+    [showToast, connectionStatus.state],
   );
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  }, []);
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+
+      if (connectionStatus.state !== "connected") {
+        showToast(
+          "warning",
+          "Not Connected to Fano",
+          "Please establish connection before uploading files",
+        );
+        return;
+      }
+
+      setIsDragOver(true);
+    },
+    [connectionStatus.state, showToast],
+  );
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -929,8 +952,8 @@ export default function HomePage() {
     if (!selectedFile || connectionStatus.state !== "connected") {
       showToast(
         "warning",
-        "Not Connected",
-        "Please wait for connection to be established",
+        "Cannot Upload File",
+        "Please wait for connection to Fano to be established before uploading files",
       );
       return;
     }
@@ -1574,6 +1597,8 @@ export default function HomePage() {
                     onDrop={handleDrop}
                     className={`upload-area p-8 text-center transition-all duration-300 ${
                       isDragOver ? "dragover" : ""
+                    } ${
+                      connectionStatus.state !== "connected" ? "opacity-50" : ""
                     }`}
                   >
                     <DocumentArrowUpIcon className="w-16 h-16 mx-auto text-white/40 mb-4" />
@@ -1583,16 +1608,34 @@ export default function HomePage() {
                         : "Drop your audio file here"}
                     </h3>
                     <p className="text-white/60 mb-6">
-                      {selectedFile
-                        ? `${formatFileSize(selectedFile.size)} • ${createSTTConfigForFile(selectedFile).encoding} encoding • Ready to process`
-                        : "Or click to browse files"}
+                      {connectionStatus.state !== "connected" ? (
+                        <span className="text-yellow-400">
+                          ⚠️ Not connected - Please wait for connection
+                        </span>
+                      ) : selectedFile ? (
+                        `${formatFileSize(selectedFile.size)} • ${createSTTConfigForFile(selectedFile).encoding} encoding • Ready to process`
+                      ) : (
+                        "Or click to browse files"
+                      )}
                     </p>
 
                     <div className="flex justify-center space-x-3">
                       <button
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => {
+                          if (connectionStatus.state !== "connected") {
+                            showToast(
+                              "warning",
+                              "Not Connected to Fano",
+                              "Please wait for connection to be established before selecting files",
+                            );
+                            return;
+                          }
+                          fileInputRef.current?.click();
+                        }}
                         className="btn-primary"
-                        disabled={isProcessing}
+                        disabled={
+                          isProcessing || connectionStatus.state !== "connected"
+                        }
                       >
                         {selectedFile ? "Change File" : "Select File"}
                       </button>

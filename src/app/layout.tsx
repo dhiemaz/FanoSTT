@@ -1,7 +1,7 @@
 import React from "react";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import type { Metadata } from "next";
-import NavigationHeaderWithConnection from "@/components/NavigationHeaderWithConnection";
+import NavigationHeaderWithConnection from "../components/NavigationHeaderWithConnection";
 import "./globals.css";
 
 const inter = Inter({
