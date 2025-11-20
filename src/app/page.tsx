@@ -14,10 +14,12 @@ import {
   XCircleIcon,
   ExclamationTriangleIcon,
   SpeakerWaveIcon,
+  SpeakerXMarkIcon,
 } from "@heroicons/react/24/outline";
 import {
   MicrophoneIcon as MicrophoneIconSolid,
   PauseIcon as PauseIconSolid,
+  SpeakerXMarkIcon as SpeakerXMarkIconSolid,
 } from "@heroicons/react/24/solid";
 
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -1365,12 +1367,12 @@ export default function HomePage() {
 
   const handlePauseRecording = useCallback(() => {
     pauseRecording();
-    showToast("info", "Recording Paused", "⏸️ Recording has been paused");
+    showToast("info", "Recording Muted", "🔇 Recording has been muted");
   }, [pauseRecording, showToast]);
 
   const handleResumeRecording = useCallback(() => {
     resumeRecording();
-    showToast("info", "Recording Resumed", "▶️ Recording has been resumed");
+    showToast("info", "Recording Unmuted", "🔊 Recording has been unmuted");
   }, [resumeRecording, showToast]);
 
   // Auto-scroll transcript
@@ -2085,7 +2087,7 @@ export default function HomePage() {
                             </button>
                           ) : (
                             <div className="flex items-center space-x-4">
-                              {/* Pause/Resume Button */}
+                              {/* Mute/Unmute Button */}
                               <button
                                 onClick={
                                   isPaused
@@ -2097,7 +2099,7 @@ export default function HomePage() {
                                 {isPaused ? (
                                   <PlayIcon className="w-6 h-6 text-white ml-1" />
                                 ) : (
-                                  <PauseIconSolid className="w-5 h-5 text-white" />
+                                  <SpeakerXMarkIconSolid className="w-5 h-5 text-white" />
                                 )}
                               </button>
 
@@ -2123,7 +2125,7 @@ export default function HomePage() {
                                     ? "⏳ Requesting microphone access..."
                                     : "🎙️ Click to start live recording"
                               : isPaused
-                                ? "⏸️ Recording paused - click to resume"
+                                ? "🔇 Recording muted - click to resume"
                                 : "🔴 Recording in progress..."}
                           </p>
                           {isRecording && (
