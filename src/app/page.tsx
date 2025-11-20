@@ -33,6 +33,7 @@ import {
   createSTTConfigForFile,
   getEncodingFromExtension,
   getEncodingFromMimeType,
+  AUTH_TOKEN,
 } from "@/types";
 import {
   isValidAudioFormat,
@@ -97,6 +98,7 @@ export default function HomePage() {
 
   // Recovery state
   const [isRecovering, setIsRecovering] = useState(false);
+
   const [recoveryAttempts, setRecoveryAttempts] = useState(0);
 
   const [wasRecordingBeforeDisconnect, setWasRecordingBeforeDisconnect] =
@@ -336,7 +338,7 @@ export default function HomePage() {
             "Live recording session restored",
           );
         } else {
-          showToast("success", "Connected", "FANO STT connection established");
+          // do nothing here
         }
       },
       onDisconnect: () => {
@@ -381,7 +383,11 @@ export default function HomePage() {
 
   // Handle DEADLINE_EXCEEDED error with reconnection and retry
   const handleDeadlineExceeded = useCallback(() => {
-    console.log("[FANO] Starting DEADLINE_EXCEEDED recovery process");
+    console.log("[MAIN] Starting DEADLINE_EXCEEDED recovery process");
+    console.log(
+      `[MAIN] Current connection state before disconnect:`,
+      connectionStatus.state,
+    );
 
     // Step 1: Disconnect current connection
     disconnect();
@@ -779,6 +785,13 @@ export default function HomePage() {
             // Attempt to reconnect with exponential backoff
             const delay = Math.min(1000 * Math.pow(2, recoveryAttempts), 10000);
             setTimeout(() => {
+              console.log(
+                `[MAIN] Attempting connection after DEADLINE_EXCEEDED with delay ${delay}ms`,
+              );
+              console.log(
+                `[MAIN] Current connection state:`,
+                connectionStatus.state,
+              );
               connect();
             }, delay);
           } else {
@@ -997,34 +1010,23 @@ export default function HomePage() {
     try {
       // Step 1: Establish connection to Fano with Auth
       if (connectionStatus.state !== "connected") {
+        console.log(
+          `[MAIN] processUploadedFile - Connection needed. Current state:`,
+          connectionStatus.state,
+        );
+        console.log(
+          `[MAIN] Auth token being used:`,
+          AUTH_TOKEN.substring(0, 50) + "...",
+        );
         showToast(
           "info",
           "Connecting",
           "Establishing connection to Fano STT...",
         );
+
         connect();
-
-        // Wait for connection with timeout
-        let attempts = 0;
-        const maxAttempts = 20; // 10 seconds timeout
-
-        while (attempts < maxAttempts) {
-          if ((connectionStatus.state as ConnectionState) === "connected")
-            break;
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          attempts++;
-        }
-
-        if ((connectionStatus.state as ConnectionState) !== "connected") {
-          showToast(
-            "error",
-            "Connection Failed",
-            "Unable to establish connection to Fano STT. Please check your network.",
-          );
-          setIsProcessing(false);
-          setIsSendingFile(false);
-          return;
-        }
+        // Give a brief moment for connection to establish
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
       showToast(
@@ -1058,11 +1060,27 @@ export default function HomePage() {
       setHasActiveRequest(true);
       sendMessage(configMessage);
 
+      console.log(
+        `[FANO] Starting audio processing section for file: ${selectedFile.name}`,
+      );
+      console.log(
+        `[FANO] Connection status before audio processing: ${connectionStatus.state}`,
+      );
+
       // Convert raw file to base64 (don't decode/re-encode for file uploads)
+      console.log(
+        `[FANO] Converting file to base64: ${selectedFile.name} (${selectedFile.size} bytes)`,
+      );
       const arrayBuffer = await selectedFile.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
+      console.log(
+        `[FANO] ArrayBuffer created, size: ${uint8Array.length} bytes`,
+      );
 
       // Convert to base64 efficiently for large files
+      console.log(
+        `[FANO] Starting base64 conversion for ${uint8Array.length} bytes`,
+      );
       let binary = "";
       const chunkSize = 0x8000; // 32KB chunks to avoid call stack overflow
       for (let i = 0; i < uint8Array.length; i += chunkSize) {
@@ -1073,26 +1091,25 @@ export default function HomePage() {
         binary += String.fromCharCode.apply(null, Array.from(chunk));
       }
       const base64Data = btoa(binary);
+      console.log(
+        `[FANO] Base64 conversion completed, length: ${base64Data.length} chars`,
+      );
 
       // Send entire audio file as single message
+      console.log(
+        `[FANO] Creating audio message with ${base64Data.length} chars of base64 data`,
+      );
       const audioMessage: FanoSTTRequest = {
         event: "request",
         data: {
           audioContent: base64Data,
         },
       };
-
-      // Check connection before sending audio data
-      if ((connectionStatus.state as ConnectionState) !== "connected") {
-        showToast(
-          "error",
-          "Connection Lost",
-          "Connection lost while preparing to send audio data. Please try again.",
-        );
-        setIsProcessing(false);
-        setIsSendingFile(false);
-        return;
-      }
+      console.log(`[FANO] Audio message created:`, {
+        event: audioMessage.event,
+        dataKeys: Object.keys(audioMessage.data),
+        audioContentLength: (audioMessage.data as any).audioContent?.length,
+      });
 
       console.log(
         "[FANO] Sending complete audio file via authenticated connection",
@@ -1100,9 +1117,11 @@ export default function HomePage() {
       console.log(
         "[FANO] Starting transcript aggregation - waiting for response segments...",
       );
+      console.log(`[FANO] About to call sendMessage with audio data`);
       setLastRequest(audioMessage);
       setHasActiveRequest(true);
       sendMessage(audioMessage);
+      console.log(`[FANO] sendMessage called for audio data`);
       setUploadProgress(100);
 
       showToast(
@@ -1117,17 +1136,7 @@ export default function HomePage() {
         data: "EOF",
       };
 
-      // Check connection before sending EOF
-      if ((connectionStatus.state as ConnectionState) !== "connected") {
-        showToast(
-          "error",
-          "Connection Lost",
-          "Connection lost before sending EOF. Upload may be incomplete.",
-        );
-        setIsProcessing(false);
-        setIsSendingFile(false);
-        return;
-      }
+      // Send EOF immediately - WebSocket is functional (receiving responses)
 
       console.log(
         "[FANO AUTH] Sending EOF message via authenticated connection:",
@@ -1139,10 +1148,10 @@ export default function HomePage() {
       setLastRequest(eofMessage);
       setHasActiveRequest(true);
       sendMessage(eofMessage);
-      // Add small delay before disconnecting to ensure EOF is sent
-      setTimeout(() => {
-        disconnect();
-      }, 200);
+      // Clear sending state before disconnect to prevent false interruption detection
+      setIsSendingFile(false);
+      setIsProcessing(false);
+      // Let Fano server close the connection after processing EOF
       // Don't show completion toast here - wait for EOF response
     } catch (error) {
       console.error("File processing error:", error);
@@ -1181,28 +1190,19 @@ export default function HomePage() {
     }
 
     if (connectionStatus.state !== "connected") {
-      console.log("Not connected, attempting to connect...");
+      console.log(
+        `[MAIN] handleStartRecording - Not connected, attempting to connect...`,
+      );
+      console.log(`[MAIN] Current connection state:`, connectionStatus.state);
+      console.log(
+        `[MAIN] Auth token being used:`,
+        AUTH_TOKEN.substring(0, 50) + "...",
+      );
       showToast("info", "Connecting", "Establishing connection to Fano STT...");
+
       connect();
-
-      // Wait for connection with timeout
-      let attempts = 0;
-      const maxAttempts = 10;
-
-      while (attempts < maxAttempts) {
-        if ((connectionStatus.state as ConnectionState) === "connected") break;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        attempts++;
-      }
-
-      if ((connectionStatus.state as ConnectionState) !== "connected") {
-        showToast(
-          "error",
-          "Connection Failed",
-          "Unable to establish connection to Fano STT. Please check your network.",
-        );
-        return;
-      }
+      // Give a brief moment for connection to establish
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
     const configMessage: FanoSTTRequest = {
@@ -1356,10 +1356,7 @@ export default function HomePage() {
       );
       setLastRequest(eofMessage);
       sendMessage(eofMessage);
-      // Add small delay before disconnecting to ensure EOF is sent
-      setTimeout(() => {
-        disconnect();
-      }, 200);
+      // Let Fano server close the connection after processing EOF
     }
 
     showToast("success", "Recording Stopped", "🔴 Transcription completed");

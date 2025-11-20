@@ -9,6 +9,39 @@ import {
   AUTH_TOKEN,
 } from "@/types";
 
+// JWT token validation utility
+function decodeJWT(token: string) {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) {
+      throw new Error("Invalid JWT format");
+    }
+
+    const header = parts[0];
+    const payload = parts[1];
+    if (!header || !payload) {
+      throw new Error("Invalid JWT header or payload");
+    }
+
+    const decoded = JSON.parse(
+      atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
+    );
+
+    return {
+      header: JSON.parse(atob(header.replace(/-/g, "+").replace(/_/g, "/"))),
+      payload: decoded,
+      isExpired: decoded.exp ? Date.now() / 1000 > decoded.exp : false,
+      expiresAt: decoded.exp ? new Date(decoded.exp * 1000) : null,
+      issuedAt: decoded.iat ? new Date(decoded.iat * 1000) : null,
+    };
+  } catch (error) {
+    return {
+      error: `Failed to decode JWT: ${error}`,
+      isValid: false,
+    };
+  }
+}
+
 interface UseWebSocketOptions {
   url?: string;
   auth?: FanoAuth;
@@ -78,7 +111,13 @@ export function useWebSocket({
   }, []);
 
   const handleOpen = useCallback(() => {
+    const timestamp = new Date().toISOString();
+    console.log(
+      `[FANO] ${timestamp} - WebSocket connection opened successfully`,
+    );
     console.log("[FANO] Connected via proxy with Authorization header");
+    console.log(`[FANO] Connection URL: ${url}`);
+    console.log(`[FANO] Auth token used: ${auth.token.substring(0, 50)}...`);
 
     // Reset reconnection attempts on successful connection
     reconnectAttemptsRef.current = 0;
@@ -91,18 +130,67 @@ export function useWebSocket({
 
     processMessageQueue();
     onConnect?.();
-  }, [updateConnectionStatus, processMessageQueue, onConnect]);
+  }, [updateConnectionStatus, processMessageQueue, onConnect, url, auth.token]);
 
   const handleMessage = useCallback(
     (event: MessageEvent) => {
       try {
+        const timestamp = new Date().toISOString();
         const message: FanoSTTResponse = JSON.parse(event.data);
-        console.log("[FANO] Received:", message);
+
+        console.log(`[FANO] ${timestamp} - Message received`);
+        console.log("[FANO] Raw message data:", event.data);
+        console.log("[FANO] Parsed message:", message);
+        console.log("[FANO] Message type:", typeof message);
+        console.log("[FANO] Message keys:", Object.keys(message || {}));
+
+        // Check for specific error patterns
+        if (message && typeof message === "object") {
+          if ("code" in message) {
+            console.log(`[FANO] Response contains code: ${message.code}`);
+          }
+          if ("message" in message) {
+            console.log(`[FANO] Response contains message: ${message.message}`);
+          }
+          if ("event" in message) {
+            console.log(`[FANO] Response event type: ${message.event}`);
+          }
+          if ("data" in message) {
+            console.log(`[FANO] Response data:`, message.data);
+          }
+        }
+
+        // Special logging for RESOURCE_EXHAUSTED errors
+        if (
+          message &&
+          typeof message === "object" &&
+          "code" in message &&
+          message.code === 8
+        ) {
+          console.error("🚫 [FANO] RESOURCE_EXHAUSTED ERROR DETECTED!");
+          console.error(
+            "[FANO] Full error response:",
+            JSON.stringify(message, null, 2),
+          );
+          console.error("[FANO] Error code:", message.code);
+          console.error("[FANO] Error message:", (message as any).message);
+          console.error("[FANO] Connection will likely close after this error");
+        }
 
         setLastMessage(message);
         onMessage?.(message);
       } catch (error) {
-        console.error("❌ [FANO] Failed to parse message:", error);
+        const timestamp = new Date().toISOString();
+        console.error(
+          `❌ [FANO] ${timestamp} - Failed to parse message:`,
+          error,
+        );
+        console.error(
+          "[FANO] Raw message data that failed to parse:",
+          event.data,
+        );
+        console.error("[FANO] Raw message type:", typeof event.data);
+        console.error("[FANO] Raw message length:", event.data?.length);
         onError?.(new Error(`Failed to parse message: ${error}`));
       }
     },
@@ -125,10 +213,24 @@ export function useWebSocket({
   const scheduleReconnectRef = useRef<() => void>();
 
   const createWebSocketConnection = useCallback(() => {
+    const timestamp = new Date().toISOString();
+    console.log(`[FANO] ${timestamp} - createWebSocketConnection called`);
+    console.log(`[FANO] Current WebSocket state:`, wsRef.current?.readyState);
+    console.log(
+      `[FANO] Auth token being used:`,
+      auth.token.substring(0, 50) + "...",
+    );
+
     if (
       wsRef.current?.readyState === WebSocket.OPEN ||
       wsRef.current?.readyState === WebSocket.CONNECTING
     ) {
+      console.log(
+        `[FANO] ${timestamp} - Connection already exists or connecting, skipping`,
+      );
+      console.log(
+        `[FANO] Current state: ${wsRef.current?.readyState === WebSocket.OPEN ? "OPEN" : "CONNECTING"}`,
+      );
       return;
     }
 
@@ -137,7 +239,44 @@ export function useWebSocket({
     });
 
     try {
+      console.log(`[FANO] ${timestamp} - Creating new WebSocket connection`);
       console.log("[FANO] Connecting via proxy server with URL : ", url);
+      console.log("[FANO] Full auth config:", {
+        ...auth,
+        token: auth.token.substring(0, 50) + "...",
+      });
+
+      // Validate JWT token
+      const tokenInfo = decodeJWT(auth.token);
+      console.log("[FANO] JWT Token Analysis:");
+      if (tokenInfo.error) {
+        console.error("[FANO] ❌ JWT Token Error:", tokenInfo.error);
+      } else {
+        console.log("[FANO] ✅ JWT Token successfully decoded");
+        console.log("[FANO] Token Header:", tokenInfo.header);
+        console.log("[FANO] Token Payload:", tokenInfo.payload);
+        console.log("[FANO] Is Expired:", tokenInfo.isExpired);
+        console.log("[FANO] Expires At:", tokenInfo.expiresAt?.toISOString());
+        console.log("[FANO] Issued At:", tokenInfo.issuedAt?.toISOString());
+
+        if (tokenInfo.isExpired) {
+          console.error("🚨 [FANO] WARNING: JWT Token is EXPIRED!");
+          console.error(
+            `[FANO] Token expired at: ${tokenInfo.expiresAt?.toISOString()}`,
+          );
+          console.error(`[FANO] Current time: ${new Date().toISOString()}`);
+        }
+
+        if (tokenInfo.payload?.aud) {
+          console.log("[FANO] Token Audience:", tokenInfo.payload.aud);
+        }
+        if (tokenInfo.payload?.sub) {
+          console.log("[FANO] Token Subject:", tokenInfo.payload.sub);
+        }
+        if (tokenInfo.payload?.iss) {
+          console.log("[FANO] Token Issuer:", tokenInfo.payload.iss);
+        }
+      }
 
       wsRef.current = new WebSocket(url);
 
@@ -146,7 +285,11 @@ export function useWebSocket({
       wsRef.current.onerror = handleError;
 
       wsRef.current.onclose = (event: CloseEvent) => {
-        console.log("[FANO] Connection closed:", event.code, event.reason);
+        const timestamp = new Date().toISOString();
+        console.log(`[FANO] ${timestamp} - Connection closed`);
+        console.log("[FANO] Close code:", event.code);
+        console.log("[FANO] Close reason:", event.reason);
+        console.log("[FANO] Was clean:", event.wasClean);
         clearTimeouts();
 
         const updates: Partial<ConnectionStatus> = {
@@ -238,20 +381,31 @@ export function useWebSocket({
   */
 
   const connect = useCallback(() => {
+    const timestamp = new Date().toISOString();
+    console.log(`[FANO] ${timestamp} - connect() function called`);
+    console.log(`[FANO] Current connection state:`, connectionStatus.state);
+    console.log(`[FANO] WebSocket readyState:`, wsRef.current?.readyState);
+
     if (
       wsRef.current?.readyState === WebSocket.OPEN ||
       wsRef.current?.readyState === WebSocket.CONNECTING
     ) {
-      //console.log("[FANO] Already connected or connecting");
+      console.log(
+        `[FANO] ${timestamp} - Already connected or connecting, skipping connect()`,
+      );
+      console.log(
+        `[FANO] State: ${wsRef.current?.readyState === WebSocket.OPEN ? "OPEN" : "CONNECTING"}`,
+      );
       return;
     }
 
+    console.log(`[FANO] ${timestamp} - Proceeding with new connection`);
     isManuallyClosedRef.current = false;
     reconnectAttemptsRef.current = 0;
     clearTimeouts();
 
     createWebSocketConnection();
-  }, [clearTimeouts, createWebSocketConnection]);
+  }, [clearTimeouts, createWebSocketConnection, connectionStatus.state]);
 
   const disconnect = useCallback(() => {
     console.log("🔌 [FANO] Manually disconnecting");
@@ -273,13 +427,35 @@ export function useWebSocket({
 
   const sendMessage = useCallback(
     (message: FanoSTTRequest) => {
-      console.log("[FANO] Sending message:", message);
+      const timestamp = new Date().toISOString();
+      console.log(`[FANO] ${timestamp} - sendMessage called`);
+      console.log("[FANO] Message to send:", message);
+      console.log(
+        `[FANO] WebSocket state: ${wsRef.current?.readyState} (${
+          wsRef.current?.readyState === WebSocket.OPEN
+            ? "OPEN"
+            : wsRef.current?.readyState === WebSocket.CONNECTING
+              ? "CONNECTING"
+              : wsRef.current?.readyState === WebSocket.CLOSED
+                ? "CLOSED"
+                : wsRef.current?.readyState === WebSocket.CLOSING
+                  ? "CLOSING"
+                  : "UNKNOWN"
+        })`,
+      );
 
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         try {
-          wsRef.current.send(JSON.stringify(message));
+          const messageStr = JSON.stringify(message);
+          console.log(
+            `[FANO] ${timestamp} - Sending message of length: ${messageStr.length}`,
+          );
+          wsRef.current.send(messageStr);
         } catch (error) {
-          console.error("❌ [FANO] Failed to send message:", error);
+          console.error(
+            `❌ [FANO] ${timestamp} - Failed to send message:`,
+            error,
+          );
           messageQueueRef.current.push(message);
           onError?.(
             error instanceof Error
@@ -288,7 +464,12 @@ export function useWebSocket({
           );
         }
       } else {
-        console.log("📥 [FANO] Queueing message - not connected");
+        console.log(
+          `📥 [FANO] ${timestamp} - Queueing message - not connected`,
+        );
+        console.log(
+          `[FANO] Current queue length: ${messageQueueRef.current.length}`,
+        );
         messageQueueRef.current.push(message);
       }
     },
