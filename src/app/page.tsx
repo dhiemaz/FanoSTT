@@ -96,7 +96,7 @@ export default function HomePage() {
   // Recovery state
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoveryAttempts, setRecoveryAttempts] = useState(0);
-  const [isInitialConnection, setIsInitialConnection] = useState(true);
+
   const [wasRecordingBeforeDisconnect, setWasRecordingBeforeDisconnect] =
     useState(false);
   const [pendingChunks, setPendingChunks] = useState<any[]>([]);
@@ -333,11 +333,8 @@ export default function HomePage() {
             "Recording Recovered",
             "Live recording session restored",
           );
-        } else if (isInitialConnection) {
-          setIsInitialConnection(false);
-          showToast("success", "Connected", "Ready to transcribe audio");
         } else {
-          showToast("success", "Reconnected", "FANO STT connection restored");
+          showToast("success", "Connected", "FANO STT connection established");
         }
       },
       onDisconnect: () => {
@@ -375,7 +372,7 @@ export default function HomePage() {
             );
           }
         } else {
-          showToast("warning", "Reconnecting...", "");
+          //showToast("warning", "Reconnecting...", "");
         }
       },
     });
@@ -420,16 +417,12 @@ export default function HomePage() {
     }
   }, [connectionStatus.state, isRetrying, lastRequest, sendMessage]);
 
-  // Auto-connect on page load
-  useEffect(() => {
-    // Auto-connect when component mounts with a slight delay for better UX
-    const timer = setTimeout(() => {
-      console.log("[FANO] Auto-connecting on page load...");
-      connect();
-    }, 500);
+  // Connection is now handled in NavigationHeader
 
-    return () => clearTimeout(timer);
-  }, [connect]);
+  // Scroll to top when page loads
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+  }, []);
 
   // Check microphone permission on mount
   useEffect(() => {
@@ -1524,83 +1517,9 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen py-8">
+    <div className="py-4">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="text-center mb-12">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-          >
-            <h1 className="text-4xl md:text-6xl font-bold gradient-text mb-6">
-              Fano STT – Advanced Speech-to-Text (Demo Version)
-            </h1>
-            <p className="text-xl text-white/70 max-w-2xl mx-auto leading-relaxed">
-              Intelligent Audio Speech Transcription with Fano, Powered by
-              Tetherfi
-            </p>
-          </motion.div>
-        </div>
-
-        {/* Status Bar */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.6 }}
-          className="flex items-center justify-between mb-8 p-4 glass rounded-2xl"
-        >
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center space-x-6">
-              {renderConnectionStatus()}
-              {isRecording && (
-                <div className="flex items-center space-x-2 text-red-400">
-                  <div className="w-3 h-3 bg-red-400 rounded-full animate-pulse"></div>
-                  <span className="text-sm font-medium">
-                    Recording • {formatDuration(recordingTime)}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center space-x-3">
-              {connectionStatus.state === "disconnected" ||
-              connectionStatus.state === "error" ? (
-                <button
-                  onClick={connect}
-                  className="px-3 py-1.5 text-xs font-medium text-green-400 bg-green-500/10 border border-green-500/20 rounded-full hover:bg-green-500/20 transition-colors"
-                  title="Connect to FANO STT"
-                >
-                  🔗 Connect
-                </button>
-              ) : connectionStatus.state === "connecting" ? (
-                <button
-                  disabled
-                  className="px-3 py-1.5 text-xs font-medium text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 rounded-full opacity-50"
-                  title="Connecting to FANO STT..."
-                >
-                  🔄 Connecting...
-                </button>
-              ) : connectionStatus.state === "reconnecting" ? (
-                <button
-                  disabled
-                  className="px-3 py-1.5 text-xs font-medium text-orange-400 bg-orange-500/10 border border-orange-500/20 rounded-full opacity-50"
-                  title="Reconnecting to FANO STT..."
-                >
-                  🔄 Reconnecting...
-                </button>
-              ) : (
-                <button
-                  onClick={disconnect}
-                  className="px-3 py-1.5 text-xs font-medium text-red-400 bg-red-500/10 border border-red-500/20 rounded-full hover:bg-red-500/20 transition-colors"
-                  title="Disconnect from FANO STT"
-                >
-                  🔌 Disconnect
-                </button>
-              )}
-            </div>
-          </div>
-        </motion.div>
 
         {/* Main Content */}
         <div className="grid lg:grid-cols-2 gap-8">
@@ -1792,12 +1711,12 @@ export default function HomePage() {
                   transition={{ duration: 0.3 }}
                   className="space-y-6"
                 >
-                  {/* Enhanced Microphone Status */}
+                  {/* Recording Control Center */}
                   <div className="glass rounded-2xl p-6">
-                    <div className="text-center mb-4">
+                    <div className="text-center mb-6">
                       <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-center gap-2">
                         <MicrophoneIcon className="w-5 h-5" />
-                        Microphone Status
+                        Recording Control Center
                       </h3>
 
                       {/* Status Indicator */}
@@ -1920,73 +1839,159 @@ export default function HomePage() {
                           </p>
                         </div>
                       )}
-                    </div>
-                  </div>
 
-                  {/* Audio Visualizer */}
-                  <div className="glass rounded-2xl p-6">
-                    <div className="text-center mb-4">
-                      <h3 className="text-lg font-semibold text-white mb-2">
-                        Audio Visualization
-                      </h3>
-                      {isRecording && (
-                        <div className="space-y-2">
-                          <div className="space-y-1">
-                            <p className="text-sm text-white/60">
-                              Level:{" "}
-                              {Math.round(
-                                (manualAudioLevel !== null
-                                  ? manualAudioLevel
-                                  : audioLevel || 0) * 100,
+                      {/* Recording Controls */}
+                      <div className="flex justify-center space-x-4 mb-6">
+                        {!isRecording ? (
+                          <button
+                            onClick={() => {
+                              if (
+                                micPermission === "denied" ||
+                                micPermission === "prompt"
+                              ) {
+                                setShowMicModal(true);
+                              } else if (
+                                connectionStatus.state === "connected"
+                              ) {
+                                handleStartRecording();
+                              }
+                            }}
+                            className="relative group"
+                            disabled={connectionStatus.state !== "connected"}
+                          >
+                            <div
+                              className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 group-hover:scale-105 ${
+                                connectionStatus.state !== "connected"
+                                  ? "bg-gray-500 cursor-not-allowed"
+                                  : micPermission === "denied" ||
+                                      micPermission === "prompt"
+                                    ? "bg-orange-500 hover:bg-orange-600 cursor-pointer"
+                                    : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
+                              }`}
+                            >
+                              <MicrophoneIconSolid className="w-8 h-8 text-white" />
+                            </div>
+                            {connectionStatus.state === "connected" &&
+                              micPermission !== "denied" && (
+                                <div className="absolute -inset-2 bg-red-500/20 rounded-full opacity-0 group-hover:opacity-100 animate-ping"></div>
                               )}
-                              % • {formatDuration(recordingTime)}
-                              {manualAudioLevel !== null && (
-                                <span className="text-blue-400 ml-1">
-                                  (Manual)
+                          </button>
+                        ) : (
+                          <div className="flex items-center space-x-4">
+                            {/* Pause/Resume Button */}
+                            <button
+                              onClick={
+                                isPaused
+                                  ? handleResumeRecording
+                                  : handlePauseRecording
+                              }
+                              className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-blue-500 to-blue-600 hover:shadow-blue-500/30 hover:shadow-xl"
+                            >
+                              {isPaused ? (
+                                <PlayIcon className="w-6 h-6 text-white ml-1" />
+                              ) : (
+                                <PauseIconSolid className="w-5 h-5 text-white" />
+                              )}
+                            </button>
+
+                            {/* Stop Button */}
+                            <button
+                              onClick={handleStopRecording}
+                              className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-gray-600 to-gray-700 hover:shadow-gray-500/30 hover:shadow-xl"
+                            >
+                              <StopIcon className="w-5 h-5 text-white" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="text-center mb-6">
+                        <p className="text-sm text-white/60">
+                          {!isRecording
+                            ? micPermission === "denied"
+                              ? "🎙️ Click to enable microphone access"
+                              : micPermission === "prompt"
+                                ? "🎤 Click to request microphone permission"
+                                : micPermission === "checking"
+                                  ? "⏳ Requesting microphone access..."
+                                  : connectionStatus.state === "connected"
+                                    ? "🎙️ Click to start live recording"
+                                    : "🔌 Connecting to FANO STT..."
+                            : isPaused
+                              ? "⏸️ Recording paused - click to resume"
+                              : "🔴 Recording in progress..."}
+                        </p>
+                        {isRecording && (
+                          <div className="mt-2 text-xs text-white/40">
+                            Duration: {formatDuration(recordingTime)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Audio Visualization */}
+                      <div className="border-t border-white/10 pt-6">
+                        <h4 className="text-md font-semibold text-white mb-4">
+                          Audio Visualization
+                        </h4>
+                        {isRecording && (
+                          <div className="space-y-2 mb-4">
+                            <div className="space-y-1">
+                              <p className="text-sm text-white/60">
+                                Level:{" "}
+                                {Math.round(
+                                  (manualAudioLevel !== null
+                                    ? manualAudioLevel
+                                    : audioLevel || 0) * 100,
+                                )}
+                                % • {formatDuration(recordingTime)}
+                                {manualAudioLevel !== null && (
+                                  <span className="text-blue-400 ml-1">
+                                    (Manual)
+                                  </span>
+                                )}
+                              </p>
+                              <div className="flex items-center justify-center space-x-4 text-xs">
+                                <span className="text-white/40">
+                                  Data: {audioData ? "✓" : "✗"}
                                 </span>
-                              )}
-                            </p>
-                            <div className="flex items-center justify-center space-x-4 text-xs">
-                              <span className="text-white/40">
-                                Data: {audioData ? "✓" : "✗"}
+                                <span className="text-white/40">
+                                  Quality: {audioQuality}
+                                </span>
+                                <button
+                                  onClick={testAudioVisualization}
+                                  className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-white/60 hover:text-white/80 transition-colors"
+                                >
+                                  Debug
+                                </button>
+                                <button
+                                  onClick={testManualAudioLevel}
+                                  className="px-2 py-1 bg-blue-500/20 hover:bg-blue-500/30 rounded text-blue-400/60 hover:text-blue-400/80 transition-colors"
+                                >
+                                  Test Level
+                                </button>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-center space-x-2">
+                              <div
+                                className={`w-2 h-2 rounded-full ${
+                                  audioQuality === "excellent"
+                                    ? "bg-green-500"
+                                    : audioQuality === "good"
+                                      ? "bg-blue-500"
+                                      : audioQuality === "fair"
+                                        ? "bg-yellow-500"
+                                        : "bg-red-500"
+                                }`}
+                              ></div>
+                              <span className="text-xs text-white/60 capitalize">
+                                {audioQuality} Quality
                               </span>
-                              <span className="text-white/40">
-                                Quality: {audioQuality}
-                              </span>
-                              <button
-                                onClick={testAudioVisualization}
-                                className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-white/60 hover:text-white/80 transition-colors"
-                              >
-                                Debug
-                              </button>
-                              <button
-                                onClick={testManualAudioLevel}
-                                className="px-2 py-1 bg-blue-500/20 hover:bg-blue-500/30 rounded text-blue-400/60 hover:text-blue-400/80 transition-colors"
-                              >
-                                Test Level
-                              </button>
                             </div>
                           </div>
-                          <div className="flex items-center justify-center space-x-2">
-                            <div
-                              className={`w-2 h-2 rounded-full ${
-                                audioQuality === "excellent"
-                                  ? "bg-green-500"
-                                  : audioQuality === "good"
-                                    ? "bg-blue-500"
-                                    : audioQuality === "fair"
-                                      ? "bg-yellow-500"
-                                      : "bg-red-500"
-                              }`}
-                            ></div>
-                            <span className="text-xs text-white/60 capitalize">
-                              {audioQuality} Quality
-                            </span>
-                          </div>
-                        </div>
-                      )}
+                        )}
+                        {renderAudioVisualizer()}
+                      </div>
                     </div>
-                    {renderAudioVisualizer()}
                   </div>
 
                   {/* Streaming Status */}
@@ -2060,94 +2065,6 @@ export default function HomePage() {
                       </div>
                     </div>
                   )}
-
-                  {/* Recording Controls */}
-                  <div className="glass rounded-2xl p-6">
-                    <div className="flex justify-center space-x-4">
-                      {!isRecording ? (
-                        <button
-                          onClick={() => {
-                            if (
-                              micPermission === "denied" ||
-                              micPermission === "prompt"
-                            ) {
-                              setShowMicModal(true);
-                            } else if (connectionStatus.state === "connected") {
-                              handleStartRecording();
-                            }
-                          }}
-                          className="relative group"
-                          disabled={connectionStatus.state !== "connected"}
-                        >
-                          <div
-                            className={`w-16 h-16 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 group-hover:scale-105 ${
-                              connectionStatus.state !== "connected"
-                                ? "bg-gray-500 cursor-not-allowed"
-                                : micPermission === "denied" ||
-                                    micPermission === "prompt"
-                                  ? "bg-orange-500 hover:bg-orange-600 cursor-pointer"
-                                  : "bg-gradient-to-br from-red-500 to-red-600 group-hover:shadow-red-500/30 group-hover:shadow-2xl"
-                            }`}
-                          >
-                            <MicrophoneIconSolid className="w-8 h-8 text-white" />
-                          </div>
-                          {connectionStatus.state === "connected" &&
-                            micPermission !== "denied" && (
-                              <div className="absolute -inset-2 bg-red-500/20 rounded-full opacity-0 group-hover:opacity-100 animate-ping"></div>
-                            )}
-                        </button>
-                      ) : (
-                        <div className="flex items-center space-x-4">
-                          {/* Pause/Resume Button */}
-                          <button
-                            onClick={
-                              isPaused
-                                ? handleResumeRecording
-                                : handlePauseRecording
-                            }
-                            className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-blue-500 to-blue-600 hover:shadow-blue-500/30 hover:shadow-xl"
-                          >
-                            {isPaused ? (
-                              <PlayIcon className="w-6 h-6 text-white ml-1" />
-                            ) : (
-                              <PauseIconSolid className="w-5 h-5 text-white" />
-                            )}
-                          </button>
-
-                          {/* Stop Button */}
-                          <button
-                            onClick={handleStopRecording}
-                            className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-gray-600 to-gray-700 hover:shadow-gray-500/30 hover:shadow-xl"
-                          >
-                            <StopIcon className="w-5 h-5 text-white" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="text-center mt-4">
-                      <p className="text-sm text-white/60">
-                        {!isRecording
-                          ? micPermission === "denied"
-                            ? "🎙️ Click to enable microphone access"
-                            : micPermission === "prompt"
-                              ? "🎤 Click to request microphone permission"
-                              : micPermission === "checking"
-                                ? "⏳ Requesting microphone access..."
-                                : connectionStatus.state === "connected"
-                                  ? "🎙️ Click to start live recording"
-                                  : "🔌 Connecting to FANO STT..."
-                          : isPaused
-                            ? "⏸️ Recording paused - click to resume"
-                            : "🔴 Recording in progress..."}
-                      </p>
-                      {isRecording && (
-                        <div className="mt-2 text-xs text-white/40">
-                          Sending 5-second audio segments to FANO STT
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

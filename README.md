@@ -9,7 +9,7 @@
 </div>
 
 <p align="center">
-  <strong>Speech-to-text transcription powered by Fano with real-time streaming and audio upload functionality</strong>
+  <strong>Cortex Speech-to-text transcription by Tetherfi with real-time streaming and audio upload functionality</strong>
 </p>
 
 <p align="center">
