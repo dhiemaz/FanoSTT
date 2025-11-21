@@ -2133,7 +2133,7 @@ export default function HomePage() {
                                 className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 hover:scale-105 bg-gradient-to-br from-blue-500 to-blue-600 hover:shadow-blue-500/30 hover:shadow-xl"
                               >
                                 {isPaused ? (
-                                  <PlayIcon className="w-6 h-6 text-white ml-1" />
+                                  <MicrophoneIconSolid className="w-6 h-6 text-white" />
                                 ) : (
                                   <div className="relative">
                                     <MicrophoneIconSolid className="w-5 h-5 text-white" />
