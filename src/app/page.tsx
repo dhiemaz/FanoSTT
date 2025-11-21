@@ -1795,7 +1795,7 @@ export default function HomePage() {
                   }`}
                 >
                   <MicrophoneIcon className="w-5 h-5 inline mr-2" />
-                  Record Live
+                  Live Audio
                 </button>
               </div>
 
