@@ -1963,7 +1963,7 @@ export default function HomePage() {
                         <div className="text-center mb-6">
                           <h3 className="text-lg font-semibold text-white mb-4 flex items-center justify-center gap-2">
                             <MicrophoneIcon className="w-5 h-5" />
-                            Recording Control Center
+                            Live Audio Control Center
                           </h3>
 
                           {/* Status Indicator */}
@@ -2006,8 +2006,8 @@ export default function HomePage() {
                                 🎙️ Microphone Access Granted
                               </p>
                               <p className="text-xs text-green-300/80">
-                                You can now start live recording. Your audio
-                                will be processed in real-time.
+                                You can now start live audio processing. Your
+                                audio transcript will be processed in real-time.
                               </p>
                             </div>
                           )}
@@ -2165,7 +2165,7 @@ export default function HomePage() {
                                   ? "🎤 Click to request microphone permission"
                                   : micPermission === "checking"
                                     ? "⏳ Requesting microphone access..."
-                                    : "🎙️ Click to start live recording"
+                                    : "🎙️ Click to start live audio processing"
                               : isPaused
                                 ? "🔇 Recording muted - click to resume"
                                 : "🔴 Recording in progress..."}
